@@ -5,12 +5,11 @@ import requests
 import plotly.express as px
 import folium
 from streamlit_folium import st_folium
-import os
-st.write("Files in directory:", os.listdir())
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-
+import os
+st.write("Files in directory:", os.listdir())
 st.set_page_config(page_title="SoilSense Dashboard", layout="wide")
 
 st.title("🌱 SoilSense Smart Fertilizer Advisory System")
