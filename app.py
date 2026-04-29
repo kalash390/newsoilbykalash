@@ -305,6 +305,8 @@ if st.sidebar.button("Predict"):
 # MAP
 # --------------------------------
 
+
+
 st.header("Farm Location Map")
 
 m = folium.Map(
@@ -320,7 +322,5 @@ folium.Marker(
 st_folium(
     m,
     width=700,
-    height=500
-)
     height=500
 )
