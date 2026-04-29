@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import os
@@ -11,9 +10,9 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
-# -----------------------------------------
+# --------------------------------
 # PAGE CONFIG
-# -----------------------------------------
+# --------------------------------
 
 st.set_page_config(
     page_title="SoilSense Smart Fertilizer Advisory System",
@@ -22,15 +21,11 @@ st.set_page_config(
 
 st.title("🌱 SoilSense Smart Fertilizer Advisory System")
 
-# -----------------------------------------
-# SHOW FILES (DEBUG)
-# -----------------------------------------
-
 st.write("Files in directory:", os.listdir())
 
-# -----------------------------------------
+# --------------------------------
 # LOAD DATASETS
-# -----------------------------------------
+# --------------------------------
 
 @st.cache_data
 def load_data():
@@ -53,8 +48,8 @@ def load_data():
 
         st.error("Dataset loading error")
         st.write(e)
-        return pd.DataFrame()
 
+        return pd.DataFrame()
 
 data = load_data()
 
@@ -62,27 +57,25 @@ if data.empty:
 
     st.stop()
 
-# -----------------------------------------
-# CLEAN DATA
-# -----------------------------------------
+# --------------------------------
+# STANDARDIZE COLUMNS
+# --------------------------------
 
-required_cols = [
+data.columns = data.columns.str.strip()
+
+required_columns = [
     "Nitrogen",
     "Phosphorus",
     "Potassium"
 ]
 
-for col in required_cols:
+for col in required_columns:
 
     if col not in data.columns:
 
         data[col] = 0
 
-data = data.fillna(data.median(numeric_only=True))
-
-# -----------------------------------------
-# CREATE TARGET IF MISSING
-# -----------------------------------------
+# Targets
 
 if "Recommended_Chemical" not in data.columns:
 
@@ -92,9 +85,34 @@ if "Recommended_Organic" not in data.columns:
 
     data["Recommended_Organic"] = "Compost"
 
-# -----------------------------------------
+# --------------------------------
+# CLEAN DATA
+# --------------------------------
+
+numeric_cols = [
+    "Nitrogen",
+    "Phosphorus",
+    "Potassium"
+]
+
+for col in numeric_cols:
+
+    data[col] = pd.to_numeric(
+        data[col],
+        errors="coerce"
+    )
+
+    data[col] = data[col].fillna(
+        data[col].median()
+    )
+
+data = data.dropna(
+    subset=["Recommended_Chemical"]
+)
+
+# --------------------------------
 # FEATURES
-# -----------------------------------------
+# --------------------------------
 
 features = [
     "Nitrogen",
@@ -106,37 +124,46 @@ X = data[features]
 
 y = data["Recommended_Chemical"]
 
-# -----------------------------------------
-# TRAIN MODEL
-# -----------------------------------------
+# --------------------------------
+# TRAIN MODEL SAFELY
+# --------------------------------
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X,
-    y,
-    test_size=0.2,
-    random_state=42
-)
+try:
 
-model = RandomForestClassifier()
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42
+    )
 
-model.fit(
-    X_train,
-    y_train
-)
+    model = RandomForestClassifier()
 
-accuracy = accuracy_score(
-    y_test,
-    model.predict(X_test)
-)
+    model.fit(
+        X_train,
+        y_train
+    )
 
-st.metric(
-    "Model Accuracy",
-    str(round(accuracy * 100, 2)) + "%"
-)
+    accuracy = accuracy_score(
+        y_test,
+        model.predict(X_test)
+    )
 
-# -----------------------------------------
+    st.metric(
+        "Model Accuracy",
+        str(round(accuracy * 100, 2)) + "%"
+    )
+
+except Exception as e:
+
+    st.error("Model training error")
+    st.write(e)
+
+    st.stop()
+
+# --------------------------------
 # YIELD MODEL
-# -----------------------------------------
+# --------------------------------
 
 data["Yield"] = (
     0.02 * data["Nitrogen"]
@@ -151,41 +178,9 @@ yield_model.fit(
     data["Yield"]
 )
 
-# -----------------------------------------
-# WEATHER API
-# -----------------------------------------
-
-API_KEY = "cb81120197f345ae396cd0fa28c1827c"
-
-city = st.sidebar.text_input(
-    "City",
-    "Gorakhpur"
-)
-
-def get_weather(city):
-
-    try:
-
-        url = (
-            "https://api.openweathermap.org/data/2.5/weather?"
-            f"q={city}&appid={API_KEY}&units=metric"
-        )
-
-        weather = requests.get(url).json()
-
-        temp = weather["main"]["temp"]
-        humidity = weather["main"]["humidity"]
-        rainfall = weather.get("rain", {}).get("1h", 0)
-
-        return temp, humidity, rainfall
-
-    except:
-
-        return 30, 60, 0
-
-# -----------------------------------------
+# --------------------------------
 # SIDEBAR INPUT
-# -----------------------------------------
+# --------------------------------
 
 st.sidebar.header("Soil Inputs")
 
@@ -210,9 +205,9 @@ K = st.sidebar.number_input(
     20
 )
 
-# -----------------------------------------
+# --------------------------------
 # PREDICTION
-# -----------------------------------------
+# --------------------------------
 
 if st.sidebar.button("Predict"):
 
@@ -237,9 +232,7 @@ if st.sidebar.button("Predict"):
         f"Organic Fertilizer: {organic}"
     )
 
-    # -------------------------------------
-    # SOIL HEALTH SCORE
-    # -------------------------------------
+    # Soil Health Score
 
     soil_score = (
         0.4 * N
@@ -247,54 +240,28 @@ if st.sidebar.button("Predict"):
         + 0.3 * K
     )
 
-    st.subheader(
-        "Soil Health Score"
-    )
+    st.subheader("Soil Health Score")
 
-    st.write(
-        round(soil_score, 2)
-    )
+    st.write(round(soil_score, 2))
 
-    # -------------------------------------
-    # YIELD PREDICTION
-    # -------------------------------------
+    # Yield Prediction
 
     yield_pred = yield_model.predict(
         input_data
     )[0]
 
-    st.subheader(
-        "Predicted Yield"
-    )
+    st.subheader("Predicted Yield")
 
     st.write(
         round(yield_pred, 2),
         "tons/hectare"
     )
 
-    # -------------------------------------
-    # BEFORE vs AFTER COMPARISON
-    # -------------------------------------
+    # BEFORE vs AFTER
 
-    st.header(
-        "Before vs After Fertilizer Replacement"
-    )
+    st.header("Before vs After Fertilizer Replacement")
 
-    if chemical == "Urea":
-
-        ratio = 0.7
-
-    elif chemical == "DAP":
-
-        ratio = 0.6
-
-    elif chemical == "Potash":
-
-        ratio = 0.65
-
-    else:
-
-        ratio = 0.7
+    ratio = 0.7
 
     after_N = round(N * ratio, 2)
     after_P = round(P * ratio, 2)
@@ -322,29 +289,21 @@ if st.sidebar.button("Predict"):
 
     })
 
-    st.dataframe(
-        comparison
-    )
+    st.dataframe(comparison)
 
     fig = px.bar(
-
         comparison,
-
         x="Nutrient",
-
         y=["Before", "After"],
-
         barmode="group",
-
         title="Before vs After NPK Levels"
-
     )
 
     st.plotly_chart(fig)
 
-# -----------------------------------------
+# --------------------------------
 # MAP
-# -----------------------------------------
+# --------------------------------
 
 st.header("Farm Location Map")
 
@@ -361,5 +320,7 @@ folium.Marker(
 st_folium(
     m,
     width=700,
+    height=500
+)
     height=500
 )
