@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import requests
@@ -9,54 +8,11 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
-st.set_page_config(page_title="SoilSense Full Dashboard", layout="wide")
+st.set_page_config(page_title="SoilSense Dashboard", layout="wide")
 
-# ---------------- LOGIN / REGISTER ----------------
+st.title("🌱 SoilSense Smart Agriculture Dashboard")
 
-def load_users():
-    try:
-        return pd.read_csv("users.csv")
-    except:
-        df = pd.DataFrame({"username":["admin"], "password":["1234"]})
-        df.to_csv("users.csv", index=False)
-        return df
-
-def save_user(username, password):
-    users = load_users()
-    users.loc[len(users)] = [username, password]
-    users.to_csv("users.csv", index=False)
-
-menu = st.sidebar.selectbox("Menu", ["Login", "Register"])
-
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if menu == "Register":
-    st.title("Register User")
-    new_user = st.text_input("New Username")
-    new_pass = st.text_input("New Password", type="password")
-    if st.button("Register"):
-        save_user(new_user, new_pass)
-        st.success("User registered successfully")
-
-if menu == "Login":
-    st.title("Login")
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Login"):
-        users = load_users()
-        if not users[(users.username == username) & (users.password == password)].empty:
-            st.session_state.logged_in = True
-        else:
-            st.error("Invalid credentials")
-
-if not st.session_state.logged_in:
-    st.stop()
-
-st.title("🌱 SoilSense Full Smart Agriculture Dashboard")
-
-# ---------------- SAMPLE DATA (replace with datasets) ----------------
+# ---------------- SAMPLE DATA (replace with your datasets) ----------------
 
 data = pd.DataFrame({
     "Nitrogen":[100,120,140,160],
@@ -69,56 +25,105 @@ data = pd.DataFrame({
     "Recommended_Organic":["Compost","Vermicompost","FYM","Biofertilizer"]
 })
 
-features = ["Nitrogen","Phosphorus","Potassium","Temperature","Humidity","Rainfall"]
+features = [
+    "Nitrogen",
+    "Phosphorus",
+    "Potassium",
+    "Temperature",
+    "Humidity",
+    "Rainfall"
+]
 
 X = data[features]
 y = data["Recommended_Chemical"]
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+    X,
+    y,
+    test_size=0.2,
+    random_state=42
 )
 
 model = RandomForestClassifier()
+
 model.fit(X_train, y_train)
 
-accuracy = accuracy_score(y_test, model.predict(X_test))
+accuracy = accuracy_score(
+    y_test,
+    model.predict(X_test)
+)
 
-st.metric("Model Accuracy", f"{round(accuracy*100,2)}%")
+st.metric(
+    "Model Accuracy",
+    f"{round(accuracy*100,2)}%"
+)
 
 # ---------------- WEATHER API ----------------
 
 API_KEY = "cb81120197f345ae396cd0fa28c1827c"
 
-city = st.sidebar.text_input("City", "Gorakhpur")
+city = st.sidebar.text_input(
+    "City",
+    "Gorakhpur"
+)
 
 def get_weather(city):
+
     try:
+
         url = (
             "https://api.openweathermap.org/data/2.5/weather?"
             f"q={city}&appid={API_KEY}&units=metric"
         )
+
         weather = requests.get(url).json()
+
         temp = weather["main"]["temp"]
+
         humidity = weather["main"]["humidity"]
-        rainfall = weather.get("rain", {}).get("1h", 0)
+
+        rainfall = weather.get(
+            "rain",
+            {}
+        ).get("1h", 0)
+
         return temp, humidity, rainfall
+
     except:
+
         return 30, 60, 0
 
 # ---------------- INPUTS ----------------
 
 st.sidebar.header("Soil Inputs")
 
-N = st.sidebar.number_input("Nitrogen", 0, 500, 120)
-P = st.sidebar.number_input("Phosphorus", 0, 200, 40)
-K = st.sidebar.number_input("Potassium", 0, 200, 20)
+N = st.sidebar.number_input(
+    "Nitrogen",
+    0,
+    500,
+    120
+)
+
+P = st.sidebar.number_input(
+    "Phosphorus",
+    0,
+    200,
+    40
+)
+
+K = st.sidebar.number_input(
+    "Potassium",
+    0,
+    200,
+    20
+)
 
 if st.sidebar.button("Predict"):
 
     temp, humidity, rainfall = get_weather(city)
 
     input_data = pd.DataFrame(
-        [[N,P,K,temp,humidity,rainfall]],
+        [[N, P, K, temp, humidity, rainfall]],
         columns=features
     )
 
@@ -129,16 +134,25 @@ if st.sidebar.button("Predict"):
     ]["Recommended_Organic"].iloc[0]
 
     soil_score = (
-        0.3 * N +
-        0.25 * P +
-        0.2 * K +
-        0.15 * temp +
-        0.1 * humidity
+        0.3 * N
+        + 0.25 * P
+        + 0.2 * K
+        + 0.15 * temp
+        + 0.1 * humidity
     )
 
-    st.success(f"Chemical Fertilizer: {chemical}")
-    st.info(f"Organic Fertilizer: {organic}")
-    st.write("Soil Health Score:", round(soil_score,2))
+    st.success(
+        f"Chemical Fertilizer: {chemical}"
+    )
+
+    st.info(
+        f"Organic Fertilizer: {organic}"
+    )
+
+    st.write(
+        "Soil Health Score:",
+        round(soil_score, 2)
+    )
 
 # ---------------- GRAPHS ----------------
 
@@ -166,19 +180,30 @@ st.plotly_chart(fig2)
 st.header("🗺 Farm Location Map")
 
 m = folium.Map(
-    location=[26.7606,83.3732],
+    location=[26.7606, 83.3732],
     zoom_start=6
 )
 
 folium.Marker(
-    [26.7606,83.3732],
+    [26.7606, 83.3732],
     popup="Farm Location"
 ).add_to(m)
 
-st_folium(m, width=700, height=500)
+st_folium(
+    m,
+    width=700,
+    height=500
+)
 
 # ---------------- DOWNLOAD REPORT ----------------
 
 if st.button("Download Report"):
-    data.to_csv("prediction_report.csv", index=False)
-    st.success("Report saved as prediction_report.csv")
+
+    data.to_csv(
+        "prediction_report.csv",
+        index=False
+    )
+
+    st.success(
+        "Report saved as prediction_report.csv"
+    )
