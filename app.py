@@ -1,13 +1,12 @@
 
-import os
-st.write("Files in directory:", os.listdir())
-
 import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
 import folium
 from streamlit_folium import st_folium
+import os
+st.write("Files in directory:", os.listdir())
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
