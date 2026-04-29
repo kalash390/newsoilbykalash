@@ -1,64 +1,166 @@
 
 import streamlit as st
 import pandas as pd
+import os
 import requests
 import plotly.express as px
 import folium
 from streamlit_folium import st_folium
-from sklearn.ensemble import RandomForestClassifier
+
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
-import os
-st.write("Files in directory:", os.listdir())
-st.set_page_config(page_title="SoilSense Dashboard", layout="wide")
+
+# -----------------------------------------
+# PAGE CONFIG
+# -----------------------------------------
+
+st.set_page_config(
+    page_title="SoilSense Smart Fertilizer Advisory System",
+    layout="wide"
+)
 
 st.title("🌱 SoilSense Smart Fertilizer Advisory System")
 
-# -----------------------------
-# SAMPLE DATA (replace with your datasets)
-# -----------------------------
+# -----------------------------------------
+# SHOW FILES (DEBUG)
+# -----------------------------------------
 
-data = pd.DataFrame({
-    "Nitrogen":[100,120,140,160],
-    "Phosphorus":[40,50,60,70],
-    "Potassium":[20,25,30,35],
-    "Temperature":[28,30,32,34],
-    "Humidity":[60,65,70,75],
-    "Rainfall":[100,120,140,160],
-    "Recommended_Chemical":["Urea","DAP","NPK","Potash"],
-    "Recommended_Organic":["Compost","Vermicompost","FYM","Biofertilizer"]
-})
+st.write("Files in directory:", os.listdir())
+
+# -----------------------------------------
+# LOAD DATASETS
+# -----------------------------------------
+
+@st.cache_data
+def load_data():
+
+    try:
+
+        data1 = pd.read_excel("SoilSense_Output.xlsx")
+        data2 = pd.read_excel("SoilSense_weather_dataset_5000_non_repeating.xlsx")
+        data3 = pd.read_excel("rabi_training_data_punjab.csv.xlsx")
+        data4 = pd.read_excel("rabi_punjabcrop.xlsx")
+
+        data = pd.concat(
+            [data1, data2, data3, data4],
+            ignore_index=True
+        )
+
+        return data
+
+    except Exception as e:
+
+        st.error("Dataset loading error")
+        st.write(e)
+        return pd.DataFrame()
+
+
+data = load_data()
+
+if data.empty:
+
+    st.stop()
+
+# -----------------------------------------
+# CLEAN DATA
+# -----------------------------------------
+
+required_cols = [
+    "Nitrogen",
+    "Phosphorus",
+    "Potassium"
+]
+
+for col in required_cols:
+
+    if col not in data.columns:
+
+        data[col] = 0
+
+data = data.fillna(data.median(numeric_only=True))
+
+# -----------------------------------------
+# CREATE TARGET IF MISSING
+# -----------------------------------------
+
+if "Recommended_Chemical" not in data.columns:
+
+    data["Recommended_Chemical"] = "Urea"
+
+if "Recommended_Organic" not in data.columns:
+
+    data["Recommended_Organic"] = "Compost"
+
+# -----------------------------------------
+# FEATURES
+# -----------------------------------------
 
 features = [
     "Nitrogen",
     "Phosphorus",
-    "Potassium",
-    "Temperature",
-    "Humidity",
-    "Rainfall"
+    "Potassium"
 ]
 
 X = data[features]
+
 y = data["Recommended_Chemical"]
 
+# -----------------------------------------
+# TRAIN MODEL
+# -----------------------------------------
+
 X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
+    X,
+    y,
+    test_size=0.2,
+    random_state=42
 )
 
 model = RandomForestClassifier()
-model.fit(X_train, y_train)
 
-accuracy = accuracy_score(y_test, model.predict(X_test))
+model.fit(
+    X_train,
+    y_train
+)
 
-st.metric("Model Accuracy", f"{round(accuracy*100,2)}%")
+accuracy = accuracy_score(
+    y_test,
+    model.predict(X_test)
+)
 
-# -----------------------------
+st.metric(
+    "Model Accuracy",
+    str(round(accuracy * 100, 2)) + "%"
+)
+
+# -----------------------------------------
+# YIELD MODEL
+# -----------------------------------------
+
+data["Yield"] = (
+    0.02 * data["Nitrogen"]
+    + 0.015 * data["Phosphorus"]
+    + 0.01 * data["Potassium"]
+)
+
+yield_model = RandomForestRegressor()
+
+yield_model.fit(
+    X,
+    data["Yield"]
+)
+
+# -----------------------------------------
 # WEATHER API
-# -----------------------------
+# -----------------------------------------
 
 API_KEY = "cb81120197f345ae396cd0fa28c1827c"
 
-city = st.sidebar.text_input("City", "Gorakhpur")
+city = st.sidebar.text_input(
+    "City",
+    "Gorakhpur"
+)
 
 def get_weather(city):
 
@@ -81,70 +183,138 @@ def get_weather(city):
 
         return 30, 60, 0
 
-# -----------------------------
-# INPUTS
-# -----------------------------
+# -----------------------------------------
+# SIDEBAR INPUT
+# -----------------------------------------
 
 st.sidebar.header("Soil Inputs")
 
-N = st.sidebar.number_input("Nitrogen", 0, 500, 120)
-P = st.sidebar.number_input("Phosphorus", 0, 200, 40)
-K = st.sidebar.number_input("Potassium", 0, 200, 20)
+N = st.sidebar.number_input(
+    "Nitrogen",
+    0,
+    500,
+    120
+)
+
+P = st.sidebar.number_input(
+    "Phosphorus",
+    0,
+    200,
+    40
+)
+
+K = st.sidebar.number_input(
+    "Potassium",
+    0,
+    200,
+    20
+)
+
+# -----------------------------------------
+# PREDICTION
+# -----------------------------------------
 
 if st.sidebar.button("Predict"):
 
-    temp, humidity, rainfall = get_weather(city)
-
     input_data = pd.DataFrame(
-        [[N,P,K,temp,humidity,rainfall]],
+        [[N, P, K]],
         columns=features
     )
 
-    chemical = model.predict(input_data)[0]
+    chemical = model.predict(
+        input_data
+    )[0]
 
     organic = data[
         data["Recommended_Chemical"] == chemical
     ]["Recommended_Organic"].iloc[0]
 
-    st.success(f"Chemical Fertilizer: {chemical}")
-    st.info(f"Organic Fertilizer: {organic}")
+    st.success(
+        f"Chemical Fertilizer: {chemical}"
+    )
 
-    # -----------------------------
+    st.info(
+        f"Organic Fertilizer: {organic}"
+    )
+
+    # -------------------------------------
+    # SOIL HEALTH SCORE
+    # -------------------------------------
+
+    soil_score = (
+        0.4 * N
+        + 0.3 * P
+        + 0.3 * K
+    )
+
+    st.subheader(
+        "Soil Health Score"
+    )
+
+    st.write(
+        round(soil_score, 2)
+    )
+
+    # -------------------------------------
+    # YIELD PREDICTION
+    # -------------------------------------
+
+    yield_pred = yield_model.predict(
+        input_data
+    )[0]
+
+    st.subheader(
+        "Predicted Yield"
+    )
+
+    st.write(
+        round(yield_pred, 2),
+        "tons/hectare"
+    )
+
+    # -------------------------------------
     # BEFORE vs AFTER COMPARISON
-    # -----------------------------
+    # -------------------------------------
 
-    st.header("📊 Before vs After NPK Comparison")
-
-    before_N = N
-    before_P = P
-    before_K = K
+    st.header(
+        "Before vs After Fertilizer Replacement"
+    )
 
     if chemical == "Urea":
-        chemical_ratio = max(0, (140 - N) / 140)
+
+        ratio = 0.7
+
     elif chemical == "DAP":
-        chemical_ratio = max(0, (30 - P) / 30)
+
+        ratio = 0.6
+
     elif chemical == "Potash":
-        chemical_ratio = max(0, (10 - K) / 10)
+
+        ratio = 0.65
+
     else:
-        chemical_ratio = 0.3
 
-    organic_ratio = 1 - chemical_ratio
+        ratio = 0.7
 
-    after_N = round(before_N * chemical_ratio, 2)
-    after_P = round(before_P * chemical_ratio, 2)
-    after_K = round(before_K * chemical_ratio, 2)
+    after_N = round(N * ratio, 2)
+    after_P = round(P * ratio, 2)
+    after_K = round(K * ratio, 2)
 
-    comparison_data = pd.DataFrame({
+    comparison = pd.DataFrame({
 
-        "Nutrient": ["Nitrogen", "Phosphorus", "Potassium"],
-
-        "Before (Chemical)": [
-            before_N,
-            before_P,
-            before_K
+        "Nutrient": [
+            "Nitrogen",
+            "Phosphorus",
+            "Potassium"
         ],
 
-        "After (Reduced Chemical)": [
+        "Before": [
+            N,
+            P,
+            K
+        ],
+
+        "After": [
             after_N,
             after_P,
             after_K
@@ -152,34 +322,39 @@ if st.sidebar.button("Predict"):
 
     })
 
-    st.dataframe(comparison_data)
+    st.dataframe(
+        comparison
+    )
 
     fig = px.bar(
-        comparison_data,
+
+        comparison,
+
         x="Nutrient",
-        y=[
-            "Before (Chemical)",
-            "After (Reduced Chemical)"
-        ],
+
+        y=["Before", "After"],
+
         barmode="group",
+
         title="Before vs After NPK Levels"
+
     )
 
     st.plotly_chart(fig)
 
-# -----------------------------
+# -----------------------------------------
 # MAP
-# -----------------------------
+# -----------------------------------------
 
-st.header("🗺 Farm Location Map")
+st.header("Farm Location Map")
 
 m = folium.Map(
-    location=[26.7606,83.3732],
+    location=[26.7606, 83.3732],
     zoom_start=6
 )
 
 folium.Marker(
-    [26.7606,83.3732],
+    [26.7606, 83.3732],
     popup="Farm Location"
 ).add_to(m)
 
