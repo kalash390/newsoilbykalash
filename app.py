@@ -1,4 +1,7 @@
 
+import os
+st.write("Files in directory:", os.listdir())
+
 import streamlit as st
 import pandas as pd
 import requests
