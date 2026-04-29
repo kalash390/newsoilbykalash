@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import os
-import requests
 import plotly.express as px
 import folium
 from streamlit_folium import st_folium
@@ -10,9 +9,9 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
-# --------------------------------
+# -------------------------
 # PAGE CONFIG
-# --------------------------------
+# -------------------------
 
 st.set_page_config(
     page_title="SoilSense Smart Fertilizer Advisory System",
@@ -21,11 +20,9 @@ st.set_page_config(
 
 st.title("🌱 SoilSense Smart Fertilizer Advisory System")
 
-st.write("Files in directory:", os.listdir())
-
-# --------------------------------
+# -------------------------
 # LOAD DATASETS
-# --------------------------------
+# -------------------------
 
 @st.cache_data
 def load_data():
@@ -51,68 +48,40 @@ def load_data():
 
         return pd.DataFrame()
 
+
 data = load_data()
 
 if data.empty:
-
     st.stop()
 
-# --------------------------------
-# STANDARDIZE COLUMNS
-# --------------------------------
+# -------------------------
+# CLEAN DATA
+# -------------------------
 
 data.columns = data.columns.str.strip()
 
-required_columns = [
+required_cols = [
     "Nitrogen",
     "Phosphorus",
     "Potassium"
 ]
 
-for col in required_columns:
+for col in required_cols:
 
     if col not in data.columns:
-
         data[col] = 0
 
-# Targets
+data = data.fillna(data.median(numeric_only=True))
 
 if "Recommended_Chemical" not in data.columns:
-
     data["Recommended_Chemical"] = "Urea"
 
 if "Recommended_Organic" not in data.columns:
-
     data["Recommended_Organic"] = "Compost"
 
-# --------------------------------
-# CLEAN DATA
-# --------------------------------
-
-numeric_cols = [
-    "Nitrogen",
-    "Phosphorus",
-    "Potassium"
-]
-
-for col in numeric_cols:
-
-    data[col] = pd.to_numeric(
-        data[col],
-        errors="coerce"
-    )
-
-    data[col] = data[col].fillna(
-        data[col].median()
-    )
-
-data = data.dropna(
-    subset=["Recommended_Chemical"]
-)
-
-# --------------------------------
-# FEATURES
-# --------------------------------
+# -------------------------
+# MODEL TRAINING
+# -------------------------
 
 features = [
     "Nitrogen",
@@ -121,49 +90,35 @@ features = [
 ]
 
 X = data[features]
-
 y = data["Recommended_Chemical"]
 
-# --------------------------------
-# TRAIN MODEL SAFELY
-# --------------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42
+)
 
-try:
+model = RandomForestClassifier()
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42
-    )
+model.fit(
+    X_train,
+    y_train
+)
 
-    model = RandomForestClassifier()
+accuracy = accuracy_score(
+    y_test,
+    model.predict(X_test)
+)
 
-    model.fit(
-        X_train,
-        y_train
-    )
+st.metric(
+    "Model Accuracy",
+    str(round(accuracy * 100, 2)) + "%"
+)
 
-    accuracy = accuracy_score(
-        y_test,
-        model.predict(X_test)
-    )
-
-    st.metric(
-        "Model Accuracy",
-        str(round(accuracy * 100, 2)) + "%"
-    )
-
-except Exception as e:
-
-    st.error("Model training error")
-    st.write(e)
-
-    st.stop()
-
-# --------------------------------
+# -------------------------
 # YIELD MODEL
-# --------------------------------
+# -------------------------
 
 data["Yield"] = (
     0.02 * data["Nitrogen"]
@@ -178,9 +133,9 @@ yield_model.fit(
     data["Yield"]
 )
 
-# --------------------------------
+# -------------------------
 # SIDEBAR INPUT
-# --------------------------------
+# -------------------------
 
 st.sidebar.header("Soil Inputs")
 
@@ -205,59 +160,69 @@ K = st.sidebar.number_input(
     20
 )
 
-# --------------------------------
-# PREDICTION
-# --------------------------------
+# -------------------------
+# SESSION STATE FIX
+# -------------------------
+
+if "prediction_done" not in st.session_state:
+    st.session_state.prediction_done = False
 
 if st.sidebar.button("Predict"):
+
+    st.session_state.prediction_done = True
 
     input_data = pd.DataFrame(
         [[N, P, K]],
         columns=features
     )
 
-    chemical = model.predict(
+    st.session_state.chemical = model.predict(input_data)[0]
+
+    st.session_state.organic = data[
+        data["Recommended_Chemical"]
+        == st.session_state.chemical
+    ]["Recommended_Organic"].iloc[0]
+
+    st.session_state.soil_score = (
+        0.4 * N +
+        0.3 * P +
+        0.3 * K
+    )
+
+    st.session_state.yield_pred = yield_model.predict(
         input_data
     )[0]
 
-    organic = data[
-        data["Recommended_Chemical"] == chemical
-    ]["Recommended_Organic"].iloc[0]
+# -------------------------
+# DISPLAY RESULT
+# -------------------------
+
+if st.session_state.prediction_done:
 
     st.success(
-        f"Chemical Fertilizer: {chemical}"
+        f"Chemical Fertilizer: {st.session_state.chemical}"
     )
 
     st.info(
-        f"Organic Fertilizer: {organic}"
-    )
-
-    # Soil Health Score
-
-    soil_score = (
-        0.4 * N
-        + 0.3 * P
-        + 0.3 * K
+        f"Organic Fertilizer: {st.session_state.organic}"
     )
 
     st.subheader("Soil Health Score")
 
-    st.write(round(soil_score, 2))
-
-    # Yield Prediction
-
-    yield_pred = yield_model.predict(
-        input_data
-    )[0]
+    st.write(
+        round(st.session_state.soil_score, 2)
+    )
 
     st.subheader("Predicted Yield")
 
     st.write(
-        round(yield_pred, 2),
+        round(st.session_state.yield_pred, 2),
         "tons/hectare"
     )
 
+    # -------------------------
     # BEFORE vs AFTER
+    # -------------------------
 
     st.header("Before vs After Fertilizer Replacement")
 
@@ -301,11 +266,9 @@ if st.sidebar.button("Predict"):
 
     st.plotly_chart(fig)
 
-# --------------------------------
+# -------------------------
 # MAP
-# --------------------------------
-
-
+# -------------------------
 
 st.header("Farm Location Map")
 
