@@ -470,7 +470,7 @@ st.caption("AI-powered soil analysis, fertilizer recommendation, and yield predi
 # CONSTANTS
 # ─────────────────────────────────────────────────────────────
 
-CITIES = ["Gorakhpur", "Lucknow", "Varanasi", "Delhi", "Mumbai", "Patna"]
+CITIES = ["Gorakhpur", "Lucknow", "Varanasi", "Delhi", "Mumbai", "Patna","Mohali"]
 BASELINE_YIELD     = 2.5
 CHEMICAL_REDUCTION = 0.30
 OWM_API_KEY        = os.getenv("OWM_API_KEY", "")
