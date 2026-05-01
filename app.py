@@ -1462,6 +1462,8 @@ from sklearn.metrics import accuracy_score, classification_report
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────
+# .streamlit/secrets.toml  (on Streamlit Cloud: Settings → Secrets)
+OWM_API_KEY = "cb81120197f345ae396cd0fa28c1827c"
 
 st.set_page_config(
     page_title="SoilSense: Smart Fertilizer Advisory System",
