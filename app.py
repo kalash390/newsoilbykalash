@@ -2440,3 +2440,174 @@ st.caption(
     "Dataset: improved_balanced_dataset_5000.xlsx · "
     "Built with Streamlit 🌱"
 )
+
+# ─────────────────────────────────────────────────────────────
+# AI CHATBOT FOR FARMER ADVICE
+# ─────────────────────────────────────────────────────────────
+
+st.divider()
+st.header("🤖 AI Chatbot for Farmer Advice")
+st.caption(
+    "Ask me anything about fertilizers, organic farming, soil health, crop yield, "
+    "weather decisions, or cost savings. I'm here to help! 🌾"
+)
+
+# ── Session state init ───────────────────────────────────────
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+if "chat_input_counter" not in st.session_state:
+    st.session_state.chat_input_counter = 0
+
+# ── Rule-based response engine ───────────────────────────────
+def get_bot_response(user_query: str) -> str:
+    """Return a rule-based AI response based on keywords in the query."""
+    if not user_query or not user_query.strip():
+        return "Please provide more details about your farming question."
+
+    q = user_query.lower().strip()
+
+    # Keyword → response mapping (order matters: most specific first)
+    responses = [
+        (["cost", "price", "save", "saving", "cheap", "expensive", "money", "budget"],
+         "💰 Switching to organic fertilizer can reduce long-term farming costs. "
+         "On average, farmers save 20–35% on fertilizer expenses while improving soil "
+         "fertility year over year. Use the Cost Savings Analysis section above to "
+         "calculate your personal savings."),
+
+        (["organic", "compost", "manure", "vermicompost", "natural"],
+         "🌿 Switching to organic fertilizer improves soil structure and reduces "
+         "chemical dependency. Organic options like compost, vermicompost, and "
+         "green manure enhance microbial activity, water retention, and long-term "
+         "soil productivity. Start with a 30% replacement and gradually increase."),
+
+        (["fertilizer", "urea", "dap", "potash", "npk", "nitrogen", "phosphorus", "potassium"],
+         "⚗️ Apply fertilizer based on soil test results and avoid overuse to maintain "
+         "soil health. Use the right NPK ratio for your crop, apply in split doses, "
+         "and combine with organic matter for best results. Overuse leads to soil "
+         "degradation and groundwater pollution."),
+
+        (["soil", "ph", "fertility", "erosion", "microbe", "earthworm"],
+         "🌱 Maintain soil health by adding organic matter and monitoring pH levels "
+         "regularly. Aim for pH 6.0–7.5 for most crops. Practice crop rotation, "
+         "cover cropping, and minimize tillage to preserve soil structure and "
+         "beneficial microorganisms."),
+
+        (["weather", "rain", "rainfall", "temperature", "humidity", "climate", "monsoon", "drought"],
+         "🌦 Adjust irrigation and fertilizer schedules based on rainfall and "
+         "temperature conditions. Avoid fertilizer application before heavy rain "
+         "(causes runoff). In dry conditions, increase irrigation frequency but "
+         "reduce volume. Check the live weather panel above for current data."),
+
+        (["yield", "production", "productivity", "harvest", "growth", "crop"],
+         "🌾 Use balanced nutrients and proper irrigation to increase crop yield. "
+         "Key practices: timely sowing, certified seeds, integrated pest management, "
+         "balanced NPK fertilization, and adequate water supply during critical "
+         "growth stages (flowering & grain filling)."),
+
+        (["irrigation", "water", "watering", "drip", "sprinkler"],
+         "💧 Efficient irrigation saves water and boosts yield. Drip irrigation can "
+         "reduce water use by 30–50% compared to flood irrigation. Water early "
+         "morning or late evening to minimize evaporation losses."),
+
+        (["pest", "disease", "insect", "fungus", "weed"],
+         "🐛 Practice Integrated Pest Management (IPM): use resistant varieties, "
+         "crop rotation, biological controls (neem, ladybugs), and chemical pesticides "
+         "only as a last resort. Regular field scouting helps detect issues early."),
+
+        (["rotation", "intercrop", "mixed", "diversif"],
+         "🔄 Crop rotation breaks pest cycles and improves soil fertility. Rotate "
+         "cereals (wheat, rice) with legumes (chickpea, soybean) to naturally fix "
+         "nitrogen. Intercropping also maximizes land use and reduces risk."),
+
+        (["hello", "hi", "hey", "namaste", "greetings"],
+         "👋 Hello farmer! I'm your SoilSense AI assistant. Ask me about fertilizers, "
+         "organic farming, soil health, weather, yield improvement, or cost savings. "
+         "How can I help you today?"),
+
+        (["thank", "thanks", "thx"],
+         "🙏 You're welcome! Happy farming! Feel free to ask anything else about "
+         "your soil, crops, or fertilizer choices."),
+    ]
+
+    for keywords, reply in responses:
+        if any(kw in q for kw in keywords):
+            return reply
+
+    return ("🤔 Please provide more details about your farming question. "
+            "I can help with topics like: **fertilizer**, **organic farming**, "
+            "**soil health**, **weather decisions**, **crop yield**, or **cost savings**.")
+
+
+# ── Quick-suggestion buttons ─────────────────────────────────
+st.markdown("**💡 Quick Questions:**")
+qcol1, qcol2, qcol3, qcol4 = st.columns(4)
+suggested_q = None
+if qcol1.button("🌿 About Organic", use_container_width=True):
+    suggested_q = "Tell me about organic farming"
+if qcol2.button("🌱 Soil Health", use_container_width=True):
+    suggested_q = "How to improve soil health?"
+if qcol3.button("🌾 Increase Yield", use_container_width=True):
+    suggested_q = "How to increase crop yield?"
+if qcol4.button("💰 Cost Savings", use_container_width=True):
+    suggested_q = "How can I save costs?"
+
+# ── Chat input form ──────────────────────────────────────────
+with st.form(key="chatbot_form", clear_on_submit=True):
+    user_question = st.text_input(
+        "Ask your farming question:",
+        placeholder="e.g., How do I improve soil fertility naturally?",
+        key=f"chat_input_{st.session_state.chat_input_counter}",
+    )
+    send_clicked = st.form_submit_button("📤 Ask", use_container_width=False, type="primary")
+
+# ── Process input ────────────────────────────────────────────
+query_to_process = None
+if send_clicked and user_question and user_question.strip():
+    query_to_process = user_question.strip()
+elif suggested_q:
+    query_to_process = suggested_q
+
+if query_to_process:
+    try:
+        bot_reply = get_bot_response(query_to_process)
+        st.session_state.chat_history.append({
+            "user": query_to_process,
+            "bot":  bot_reply,
+        })
+        st.session_state.chat_input_counter += 1
+    except Exception as e:
+        st.error(f"⚠️ Chatbot error: {e}")
+
+# ── Action buttons ───────────────────────────────────────────
+ac1, ac2 = st.columns([1, 5])
+if ac1.button("🗑 Clear Chat", use_container_width=True):
+    st.session_state.chat_history = []
+    st.rerun()
+
+# ── Display chat history (newest at bottom) ──────────────────
+if st.session_state.chat_history:
+    st.markdown("---")
+    st.markdown(f"**💬 Conversation History** ({len(st.session_state.chat_history)} messages)")
+
+    for chat in st.session_state.chat_history:
+        try:
+            with st.chat_message("user", avatar="👨‍🌾"):
+                st.markdown(chat["user"])
+            with st.chat_message("assistant", avatar="🤖"):
+                st.markdown(chat["bot"])
+        except Exception:
+            # Fallback for older Streamlit versions
+            st.markdown(f"**👨‍🌾 You:** {chat['user']}")
+            st.markdown(f"**🤖 SoilSense AI:** {chat['bot']}")
+            st.markdown("---")
+else:
+    st.info(
+        "💬 No conversation yet. Type a question above or click a quick-suggestion "
+        "button to start chatting with the SoilSense AI assistant!"
+    )
+
+# ── Footer note ──────────────────────────────────────────────
+st.caption(
+    "🤖 SoilSense AI Chatbot · Rule-based assistant · "
+    "For complex agronomy questions, consult your local agricultural extension officer."
+)
