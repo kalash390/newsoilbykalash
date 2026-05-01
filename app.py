@@ -6254,7 +6254,16 @@ else:
 # ═════════════════════════════════════════════════════════════
 # 🤖 SMART AI FARMING ASSISTANT (Uses Live NPK Values)
 # ═════════════════════════════════════════════════════════════
-
+# TEMPORARY DEBUG — remove after fixing
+with st.expander("🔍 Debug Info"):
+    try:
+        key = st.secrets.get("OPENAI_API_KEY", "")
+        if key:
+            st.success(f"✅ Key found — starts with: {key[:8]}...")
+        else:
+            st.error("❌ Key is empty or not found")
+    except Exception as e:
+        st.error(f"❌ secrets error: {e}")
 st.divider()
 st.header("🤖 Smart AI Farming Assistant (Uses Live NPK Values)")
 
