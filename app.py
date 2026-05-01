@@ -1988,6 +1988,144 @@ else:
     )
 
 # ─────────────────────────────────────────────────────────────
+# CHEMICAL → ORGANIC FERTILIZER SWITCH IMPACT
+# ─────────────────────────────────────────────────────────────
+
+st.divider()
+st.markdown(
+    '<div class="section-title">♻️ Chemical to Organic Fertilizer Switch Impact on NPK Levels</div>',
+    unsafe_allow_html=True,
+)
+
+# Initialize session state for this feature so graph persists across reruns
+if "organic_switch_on" not in st.session_state:
+    st.session_state.organic_switch_on = False
+if "organic_npk_data" not in st.session_state:
+    st.session_state.organic_npk_data = None
+
+# Pull NPK values from session_state if prediction has been run,
+# otherwise fall back to current sidebar slider values
+try:
+    chem_N = float(st.session_state.N) if st.session_state.get("N") is not None else float(N)
+    chem_P = float(st.session_state.P) if st.session_state.get("P") is not None else float(P)
+    chem_K = float(st.session_state.K) if st.session_state.get("K") is not None else float(K)
+except Exception:
+    chem_N, chem_P, chem_K = 0.0, 0.0, 0.0
+
+# Sanitize: no NaN, no negatives
+def _safe_val(v):
+    try:
+        v = float(v)
+        if pd.isna(v) or v < 0:
+            return 0.0
+        return v
+    except Exception:
+        return 0.0
+
+chem_N = _safe_val(chem_N)
+chem_P = _safe_val(chem_P)
+chem_K = _safe_val(chem_K)
+
+# Toggle switch
+organic_toggle = st.toggle(
+    "🌿 Switch to Organic Fertilizer",
+    value=st.session_state.organic_switch_on,
+    key="organic_switch_toggle",
+    help="Toggle ON to see the impact of replacing chemical fertilizer with organic (assumes 30% nutrient reduction).",
+)
+st.session_state.organic_switch_on = organic_toggle
+
+# Compute organic equivalents (30% reduction → multiply by 0.7)
+org_N = round(chem_N * 0.7, 2)
+org_P = round(chem_P * 0.7, 2)
+org_K = round(chem_K * 0.7, 2)
+
+# Persist computed values
+st.session_state.organic_npk_data = {
+    "chem_N": chem_N, "chem_P": chem_P, "chem_K": chem_K,
+    "org_N":  org_N,  "org_P":  org_P,  "org_K":  org_K,
+}
+
+st.markdown("### Impact of Switching from Chemical to Organic Fertilizer")
+
+if not organic_toggle:
+    # OFF → show only chemical values
+    st.info("🔌 Toggle is **OFF** — currently showing only Chemical Fertilizer values. Turn it ON to compare with Organic.")
+
+    chem_only_df = pd.DataFrame({
+        "Nutrient":         ["Nitrogen", "Phosphorus", "Potassium"],
+        "Chemical Input":   [chem_N, chem_P, chem_K],
+    })
+    st.dataframe(chem_only_df, use_container_width=True, hide_index=True)
+
+    fig_chem_only = px.bar(
+        chem_only_df, x="Nutrient", y="Chemical Input",
+        text="Chemical Input",
+        color="Nutrient",
+        color_discrete_sequence=["#1565c0", "#e65100", "#6a1b9a"],
+        title="Current Chemical Fertilizer NPK Levels (kg/ha)",
+        labels={"Chemical Input": "Value (kg/ha)"},
+    )
+    fig_chem_only.update_traces(textposition="outside")
+    fig_chem_only.update_layout(height=400, plot_bgcolor="white", showlegend=False)
+    st.plotly_chart(fig_chem_only, use_container_width=True)
+
+else:
+    # ON → show full chemical vs organic comparison
+    c1, c2, c3 = st.columns(3)
+    c1.metric("🧪 Nitrogen (Chem → Org)",   f"{org_N} kg/ha", delta=f"-{round(chem_N - org_N, 2)} kg")
+    c2.metric("🧪 Phosphorus (Chem → Org)", f"{org_P} kg/ha", delta=f"-{round(chem_P - org_P, 2)} kg")
+    c3.metric("🧪 Potassium (Chem → Org)",  f"{org_K} kg/ha", delta=f"-{round(chem_K - org_K, 2)} kg")
+
+    # Comparison table
+    comparison_df = pd.DataFrame({
+        "Nutrient":         ["Nitrogen", "Phosphorus", "Potassium"],
+        "Chemical Input":   [chem_N, chem_P, chem_K],
+        "Organic Output":   [org_N,  org_P,  org_K],
+        "Reduction (kg)":   [round(chem_N - org_N, 2),
+                             round(chem_P - org_P, 2),
+                             round(chem_K - org_K, 2)],
+        "Reduction (%)":    ["30%", "30%", "30%"],
+    })
+    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+
+    # Grouped bar chart — Chemical vs Organic
+    graph_df = pd.DataFrame({
+        "Nutrient":      ["Nitrogen", "Phosphorus", "Potassium",
+                          "Nitrogen", "Phosphorus", "Potassium"],
+        "Value":         [chem_N, chem_P, chem_K, org_N, org_P, org_K],
+        "Fertilizer":    ["Chemical", "Chemical", "Chemical",
+                          "Organic",  "Organic",  "Organic"],
+    })
+
+    try:
+        fig_switch = px.bar(
+            graph_df,
+            x="Nutrient", y="Value",
+            color="Fertilizer", barmode="group",
+            text="Value",
+            color_discrete_map={"Chemical": "#e53935", "Organic": "#43a047"},
+            title="NPK Level Change After Switching to Organic Fertilizer",
+            labels={"Value": "Value (kg/ha)", "Nutrient": "Nutrient"},
+        )
+        fig_switch.update_traces(textposition="outside")
+        fig_switch.update_layout(
+            height=420,
+            plot_bgcolor="white",
+            legend_title="Fertilizer Type",
+            yaxis=dict(rangemode="tozero"),
+        )
+        st.plotly_chart(fig_switch, use_container_width=True)
+    except Exception as e:
+        st.error(f"⚠️ Could not render comparison graph: {e}")
+
+    st.success(
+        "✅ **Insight:** Switching to organic fertilizer reduces NPK chemical load by **30%**, "
+        "improving long-term soil health, microbial activity, and reducing groundwater contamination — "
+        "while still maintaining sustainable yield levels."
+    )
+
+# ─────────────────────────────────────────────────────────────
 # DATASET INSIGHTS  (always visible)
 # ─────────────────────────────────────────────────────────────
 
