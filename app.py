@@ -473,7 +473,7 @@ st.caption("AI-powered soil analysis, fertilizer recommendation, and yield predi
 CITIES = ["Gorakhpur", "Lucknow", "Varanasi", "Delhi", "Mumbai", "Patna","Mohali"]
 BASELINE_YIELD     = 2.5
 CHEMICAL_REDUCTION = 0.30
-OWM_API_KEY        = os.getenv("OWM_API_KEY", "")
+OWM_API_KEY        = os.getenv("OWM_API_KEY", "cb81120197f345ae396cd0fa28c1827c")
 FEATURES           = ["Nitrogen", "Phosphorus", "Potassium"]
 
 # ─────────────────────────────────────────────────────────────
