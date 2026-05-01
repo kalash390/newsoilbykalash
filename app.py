@@ -2586,6 +2586,474 @@ folium.Marker(
 
 st_folium(farm_map, width=700, height=500)
 
+
+# ═════════════════════════════════════════════════════════════
+# 🩺 SOIL HEALTH DIAGNOSTIC REPORT (Medical-Style PDF)
+# ═════════════════════════════════════════════════════════════
+
+from io import BytesIO
+from datetime import datetime as _dt
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm, mm
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.platypus import (
+        SimpleDocTemplate, Table, TableStyle, Paragraph,
+        Spacer, HRFlowable, PageBreak,
+    )
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+
+
+# ── Normal range definitions ─────────────────────────────────
+NORMAL_RANGES = {
+    "Nitrogen":      (50, 150, "kg/ha"),
+    "Phosphorus":    (20, 60,  "kg/ha"),
+    "Potassium":     (10, 40,  "kg/ha"),
+    "Soil Moisture": (30, 60,  "%"),
+    "Temperature":   (20, 35,  "°C"),
+    "Soil pH":       (6.0, 7.5, ""),
+}
+
+
+def _check_status(value, low, high):
+    """Return ('Normal'|'Low'|'High', color)."""
+    try:
+        v = float(value)
+        if v < low:    return "Low",    colors.HexColor("#1565c0")
+        if v > high:   return "High",   colors.HexColor("#c62828")
+        return            "Normal", colors.HexColor("#2e7d32")
+    except Exception:
+        return "N/A", colors.grey
+
+
+def _interpret_health(score):
+    """Return health interpretation based on score."""
+    try:
+        s = float(score)
+        if s >= 80: return "Healthy Soil",  colors.HexColor("#2e7d32")
+        if s >= 60: return "Moderate Soil", colors.HexColor("#f9a825")
+        return         "Poor Soil",     colors.HexColor("#c62828")
+    except Exception:
+        return "N/A", colors.grey
+
+
+def generate_pdf_report(report_data: dict) -> bytes:
+    """Generate medical-style soil health PDF and return bytes."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=A4,
+        rightMargin=1.5*cm, leftMargin=1.5*cm,
+        topMargin=1.2*cm, bottomMargin=1.2*cm,
+        title="Soil Health Diagnostic Report",
+    )
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "Title", parent=styles["Heading1"], fontSize=20,
+        textColor=colors.HexColor("#1b5e20"), alignment=TA_CENTER,
+        spaceAfter=4, fontName="Helvetica-Bold",
+    )
+    subtitle_style = ParagraphStyle(
+        "Subtitle", parent=styles["Heading2"], fontSize=13,
+        textColor=colors.HexColor("#388e3c"), alignment=TA_CENTER,
+        spaceAfter=6, fontName="Helvetica-Bold",
+    )
+    section_style = ParagraphStyle(
+        "Section", parent=styles["Heading3"], fontSize=12,
+        textColor=colors.white,
+        backColor=colors.HexColor("#1b5e20"),
+        alignment=TA_LEFT, spaceBefore=8, spaceAfter=6,
+        leftIndent=4, borderPadding=4,
+        fontName="Helvetica-Bold",
+    )
+    normal_style = ParagraphStyle(
+        "Normal2", parent=styles["Normal"], fontSize=10,
+        fontName="Helvetica",
+    )
+    footer_style = ParagraphStyle(
+        "Footer", parent=styles["Normal"], fontSize=8,
+        textColor=colors.grey, alignment=TA_CENTER,
+    )
+
+    story = []
+
+    # ── HEADER ──────────────────────────────────────────────
+    story.append(Paragraph("🌱 SoilSense Smart Agriculture Laboratory", title_style))
+    story.append(Paragraph("Soil Health Diagnostic Report", subtitle_style))
+    story.append(HRFlowable(width="100%", thickness=2,
+                            color=colors.HexColor("#1b5e20"), spaceAfter=8))
+
+    # ── PATIENT-LIKE INFO TABLE ─────────────────────────────
+    info_data = [
+        ["Farmer Name:",   report_data.get("farmer_name", "N/A"),
+         "Date:",          report_data.get("date", "N/A")],
+        ["Farm Location:", report_data.get("location", "N/A"),
+         "Time:",          report_data.get("time", "N/A")],
+        ["Crop:",          report_data.get("crop", "N/A"),
+         "Input Mode:",    report_data.get("input_mode", "Manual")],
+        ["Report ID:",     report_data.get("report_id", "N/A"),
+         "Lab:",           "SoilSense AI Lab"],
+    ]
+    info_table = Table(info_data, colWidths=[3.2*cm, 5.5*cm, 3*cm, 5.5*cm])
+    info_table.setStyle(TableStyle([
+        ("FONTNAME",   (0, 0), (-1, -1), "Helvetica"),
+        ("FONTNAME",   (0, 0), (0, -1),  "Helvetica-Bold"),
+        ("FONTNAME",   (2, 0), (2, -1),  "Helvetica-Bold"),
+        ("FONTSIZE",   (0, 0), (-1, -1), 10),
+        ("TEXTCOLOR",  (0, 0), (0, -1),  colors.HexColor("#1b5e20")),
+        ("TEXTCOLOR",  (2, 0), (2, -1),  colors.HexColor("#1b5e20")),
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f1f8e9")),
+        ("BOX",        (0, 0), (-1, -1), 1, colors.HexColor("#1b5e20")),
+        ("INNERGRID",  (0, 0), (-1, -1), 0.3, colors.HexColor("#a5d6a7")),
+        ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING",(0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
+    ]))
+    story.append(info_table)
+    story.append(Spacer(1, 10))
+
+    # ── TEST RESULTS TABLE ──────────────────────────────────
+    story.append(Paragraph("&nbsp;&nbsp;LABORATORY TEST RESULTS", section_style))
+
+    test_header = ["Parameter", "Observed Value", "Normal Range", "Unit", "Status"]
+    test_rows   = [test_header]
+
+    parameters = [
+        ("Nitrogen",      report_data.get("N")),
+        ("Phosphorus",    report_data.get("P")),
+        ("Potassium",     report_data.get("K")),
+        ("Soil Moisture", report_data.get("moisture")),
+        ("Temperature",   report_data.get("temperature")),
+        ("Soil pH",       report_data.get("pH")),
+    ]
+
+    status_colors_for_table = []
+    for idx, (param, val) in enumerate(parameters, start=1):
+        low, high, unit = NORMAL_RANGES[param]
+        status, status_color = _check_status(val, low, high)
+        try:
+            display_val = f"{float(val):.2f}" if val is not None else "N/A"
+        except Exception:
+            display_val = "N/A"
+        test_rows.append([
+            param,
+            display_val,
+            f"{low} - {high}",
+            unit,
+            status,
+        ])
+        status_colors_for_table.append((idx, status_color))
+
+    test_table = Table(test_rows, colWidths=[4.2*cm, 3.5*cm, 3.5*cm, 2*cm, 3.5*cm])
+    style_cmds = [
+        ("BACKGROUND",  (0, 0), (-1, 0), colors.HexColor("#1b5e20")),
+        ("TEXTCOLOR",   (0, 0), (-1, 0), colors.white),
+        ("FONTNAME",    (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE",    (0, 0), (-1, 0), 10),
+        ("FONTSIZE",    (0, 1), (-1, -1), 9.5),
+        ("ALIGN",       (0, 0), (-1, -1), "CENTER"),
+        ("ALIGN",       (0, 1), (0, -1),  "LEFT"),
+        ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME",    (0, 1), (0, -1),  "Helvetica-Bold"),
+        ("FONTNAME",    (4, 1), (4, -1),  "Helvetica-Bold"),
+        ("BOX",         (0, 0), (-1, -1), 1.2, colors.HexColor("#1b5e20")),
+        ("INNERGRID",   (0, 0), (-1, -1), 0.4, colors.grey),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+            [colors.white, colors.HexColor("#f1f8e9")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING",(0, 0), (-1, -1), 6),
+        ("TOPPADDING",  (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
+    ]
+    # Add status color to status column per row
+    for row_idx, color in status_colors_for_table:
+        style_cmds.append(("TEXTCOLOR", (4, row_idx), (4, row_idx), color))
+    test_table.setStyle(TableStyle(style_cmds))
+    story.append(test_table)
+    story.append(Spacer(1, 12))
+
+    # ── FERTILIZER RECOMMENDATION ───────────────────────────
+    story.append(Paragraph("&nbsp;&nbsp;FERTILIZER RECOMMENDATION", section_style))
+    fert_data = [
+        ["Recommendation Type", "Recommended Product"],
+        ["Chemical Fertilizer", report_data.get("chemical", "N/A")],
+        ["Organic Fertilizer",  report_data.get("organic", "N/A")],
+    ]
+    fert_table = Table(fert_data, colWidths=[7*cm, 9.7*cm])
+    fert_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#388e3c")),
+        ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+        ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME",   (0, 1), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE",   (0, 0), (-1, -1), 10),
+        ("ALIGN",      (0, 0), (-1, -1), "LEFT"),
+        ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
+        ("BOX",        (0, 0), (-1, -1), 1, colors.HexColor("#1b5e20")),
+        ("INNERGRID",  (0, 0), (-1, -1), 0.4, colors.grey),
+        ("LEFTPADDING",(0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+            [colors.white, colors.HexColor("#f1f8e9")]),
+    ]))
+    story.append(fert_table)
+    story.append(Spacer(1, 12))
+
+    # ── SOIL HEALTH SCORE ───────────────────────────────────
+    story.append(Paragraph("&nbsp;&nbsp;SOIL HEALTH SCORE", section_style))
+    score = report_data.get("soil_score", 0)
+    interp, interp_color = _interpret_health(score)
+    score_data = [
+        ["Soil Health Score", "Interpretation", "Status"],
+        [f"{score} / 200", interp,
+         "✓ Within Acceptable Range" if interp == "Healthy Soil"
+            else ("⚠ Needs Improvement" if interp == "Moderate Soil"
+                  else "✗ Critical Action Needed")],
+    ]
+    score_table = Table(score_data, colWidths=[5*cm, 5*cm, 6.7*cm])
+    score_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#388e3c")),
+        ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+        ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE",   (0, 0), (-1, -1), 10),
+        ("ALIGN",      (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME",   (0, 1), (-1, 1), "Helvetica-Bold"),
+        ("TEXTCOLOR",  (1, 1), (1, 1), interp_color),
+        ("BOX",        (0, 0), (-1, -1), 1, colors.HexColor("#1b5e20")),
+        ("INNERGRID",  (0, 0), (-1, -1), 0.4, colors.grey),
+        ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#f1f8e9")),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 8),
+    ]))
+    story.append(score_table)
+    story.append(Spacer(1, 12))
+
+    # ── YIELD PREDICTION ────────────────────────────────────
+    story.append(Paragraph("&nbsp;&nbsp;YIELD PREDICTION", section_style))
+    yield_data = [
+        ["Parameter", "Predicted Value", "Baseline", "Improvement"],
+        ["Crop Yield",
+         f"{report_data.get('yield_pred', 'N/A')} tons/hectare",
+         f"{report_data.get('baseline_yield', BASELINE_YIELD)} t/ha",
+         f"{report_data.get('yield_improvement', 'N/A')}%"],
+    ]
+    yield_table = Table(yield_data, colWidths=[4*cm, 5*cm, 3.5*cm, 4.2*cm])
+    yield_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#388e3c")),
+        ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+        ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE",   (0, 0), (-1, -1), 10),
+        ("ALIGN",      (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME",   (0, 1), (-1, 1), "Helvetica-Bold"),
+        ("TEXTCOLOR",  (1, 1), (1, 1), colors.HexColor("#1b5e20")),
+        ("BOX",        (0, 0), (-1, -1), 1, colors.HexColor("#1b5e20")),
+        ("INNERGRID",  (0, 0), (-1, -1), 0.4, colors.grey),
+        ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#f1f8e9")),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 7),
+    ]))
+    story.append(yield_table)
+    story.append(Spacer(1, 12))
+
+    # ── COST ANALYSIS ───────────────────────────────────────
+    story.append(Paragraph("&nbsp;&nbsp;COST ANALYSIS", section_style))
+    cost_data = [
+        ["Cost Type", "Amount (₹/hectare)"],
+        ["Chemical Fertilizer Cost",
+         f"₹{report_data.get('chemical_cost', 0):,.2f}"],
+        ["Organic Fertilizer Cost",
+         f"₹{report_data.get('organic_cost', 0):,.2f}"],
+        ["Estimated Savings",
+         f"₹{report_data.get('savings', 0):,.2f}  ({report_data.get('savings_pct', 0)}%)"],
+    ]
+    cost_table = Table(cost_data, colWidths=[9*cm, 7.7*cm])
+    cost_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#388e3c")),
+        ("TEXTCOLOR",  (0, 0), (-1, 0), colors.white),
+        ("FONTNAME",   (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE",   (0, 0), (-1, -1), 10),
+        ("ALIGN",      (0, 0), (-1, -1), "LEFT"),
+        ("ALIGN",      (1, 1), (1, -1),  "RIGHT"),
+        ("VALIGN",     (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME",   (0, 1), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME",   (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("TEXTCOLOR",  (1, -1), (1, -1), colors.HexColor("#2e7d32")),
+        ("BACKGROUND", (0, -1), (-1, -1), colors.HexColor("#c8e6c9")),
+        ("BOX",        (0, 0), (-1, -1), 1, colors.HexColor("#1b5e20")),
+        ("INNERGRID",  (0, 0), (-1, -1), 0.4, colors.grey),
+        ("LEFTPADDING",(0, 0), (-1, -1), 8),
+        ("RIGHTPADDING",(0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -2),
+            [colors.white, colors.HexColor("#f1f8e9")]),
+    ]))
+    story.append(cost_table)
+    story.append(Spacer(1, 14))
+
+    # ── SIGNATURE / DISCLAIMER ──────────────────────────────
+    story.append(HRFlowable(width="100%", thickness=1,
+                            color=colors.HexColor("#1b5e20"), spaceAfter=6))
+    story.append(Paragraph(
+        "<b>Authorized by:</b> SoilSense AI Diagnostic Engine "
+        "(RandomForest Classifier · Accuracy: " +
+        f"{report_data.get('model_accuracy', 'N/A')}%)",
+        normal_style,
+    ))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(
+        "<i>Disclaimer: This is an AI-generated advisory report. For critical farm "
+        "decisions, please consult your local agricultural extension officer. "
+        "Test results are based on the provided input parameters at the time of analysis.</i>",
+        ParagraphStyle("disc", parent=normal_style, fontSize=8,
+                       textColor=colors.grey, alignment=TA_CENTER),
+    ))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        f"Generated on {report_data.get('date', '')} at {report_data.get('time', '')} "
+        f"· Report ID: {report_data.get('report_id', 'N/A')} · "
+        "© SoilSense Smart Agriculture Laboratory",
+        footer_style,
+    ))
+
+    doc.build(story)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
+
+
+# ═════════════════════════════════════════════════════════════
+# 🩺 PDF REPORT UI SECTION
+# ═════════════════════════════════════════════════════════════
+
+st.divider()
+st.markdown(
+    '<div class="section-title">🩺 Soil Health Diagnostic Report (Medical Style)</div>',
+    unsafe_allow_html=True,
+)
+
+if not REPORTLAB_AVAILABLE:
+    st.error(
+        "⚠️ **ReportLab is not installed.** Add `reportlab` to your `requirements.txt` "
+        "and redeploy your app to enable PDF report generation."
+    )
+elif not st.session_state.get("done"):
+    st.info(
+        "📋 Run a fertilizer prediction first (using the sidebar) to generate "
+        "your personalized **Soil Health Diagnostic Report**."
+    )
+else:
+    st.caption(
+        "Generate a professional medical-style soil health report with all your "
+        "test results, fertilizer recommendations, yield prediction, and cost analysis."
+    )
+
+    # Optional farmer info input
+    finfo1, finfo2 = st.columns(2)
+    with finfo1:
+        farmer_name = st.text_input(
+            "👨‍🌾 Farmer Name (optional)",
+            value="Farmer",
+            key="pdf_farmer_name",
+        )
+        input_mode = st.selectbox(
+            "📥 Input Mode",
+            ["Manual", "IoT Sensor", "Dataset"],
+            index=1 if st.session_state.get("iot_use_for_prediction") else 0,
+            key="pdf_input_mode",
+        )
+    with finfo2:
+        farm_loc = st.text_input(
+            "📍 Farm Location",
+            value=st.session_state.city or "N/A",
+            key="pdf_farm_loc",
+        )
+
+    if st.button("🧪 Generate PDF Report", type="primary", use_container_width=False):
+        try:
+            ss = st.session_state
+            now = _dt.now()
+
+            # Pull cost data if available
+            cost = ss.cost_analysis_data or {}
+
+            report_data = {
+                "farmer_name":      farmer_name or "Farmer",
+                "location":         farm_loc or ss.city or "N/A",
+                "crop":             ss.crop_input or "N/A",
+                "date":             now.strftime("%d-%b-%Y"),
+                "time":             now.strftime("%I:%M %p"),
+                "input_mode":       input_mode,
+                "report_id":        f"SS-{now.strftime('%Y%m%d-%H%M%S')}",
+                "N":                ss.N,
+                "P":                ss.P,
+                "K":                ss.K,
+                "moisture":         ss.moisture,
+                "temperature":      (ss.weather or {}).get("temperature", "N/A"),
+                "pH":               ss.pH,
+                "chemical":         ss.chemical or "N/A",
+                "organic":          ss.organic  or "N/A",
+                "soil_score":       ss.soil_score or 0,
+                "yield_pred":       ss.yield_pred or 0,
+                "yield_improvement":ss.yield_impr or 0,
+                "baseline_yield":   BASELINE_YIELD,
+                "chemical_cost":    cost.get("chemical_cost", 0),
+                "organic_cost":     cost.get("organic_cost", 0),
+                "savings":          cost.get("savings", 0),
+                "savings_pct":      cost.get("savings_pct", 0),
+                "model_accuracy":   accuracy,
+            }
+
+            with st.spinner("📄 Generating professional PDF report..."):
+                pdf_bytes = generate_pdf_report(report_data)
+
+            st.success("✅ Report generated successfully!")
+
+            # Preview summary
+            with st.expander("👁 View Report Summary", expanded=False):
+                preview_col1, preview_col2 = st.columns(2)
+                with preview_col1:
+                    st.markdown(f"""
+                    **🆔 Report ID:** `{report_data['report_id']}`  
+                    **👨‍🌾 Farmer:** {report_data['farmer_name']}  
+                    **📍 Location:** {report_data['location']}  
+                    **🌱 Crop:** {report_data['crop']}  
+                    **📅 Date:** {report_data['date']} · {report_data['time']}
+                    """)
+                with preview_col2:
+                    st.markdown(f"""
+                    **⚗️ Chemical Fertilizer:** {report_data['chemical']}  
+                    **🌿 Organic Fertilizer:** {report_data['organic']}  
+                    **🧮 Soil Score:** {report_data['soil_score']}  
+                    **🌾 Yield:** {report_data['yield_pred']} t/ha  
+                    **💰 Savings:** ₹{report_data['savings']:,.2f}
+                    """)
+
+            # Download button
+            st.download_button(
+                label="📥 Download Soil Health Report (PDF)",
+                data=pdf_bytes,
+                file_name=f"Soil_Health_Report_{report_data['report_id']}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                type="primary",
+            )
+
+        except Exception as e:
+            st.error(f"❌ PDF generation error: {e}")
+            st.info(
+                "Please ensure ReportLab is installed (`pip install reportlab`) "
+                "and that you have run a successful prediction."
+            )
+
 # ═════════════════════════════════════════════════════════════
 # 🤖 AI CHATBOT FOR FARMER ADVICE
 # ═════════════════════════════════════════════════════════════
