@@ -1444,8 +1444,314 @@
 
 # st.caption("SoilSense · Powered by RandomForest AI · Dataset: improved_balanced_dataset_5000.xlsx · Built with Streamlit 🌱")
 
+# ─────────────────────────────────────────────────────────────
+# LIVE IoT SENSOR MONITORING
+# ─────────────────────────────────────────────────────────────
+
+import random
+import time
+from datetime import datetime
+
+st.header("📡 Live IoT Sensor Data")
+st.caption(
+    "Real-time soil & weather telemetry from ESP32 field sensors. "
+    "Currently running in **simulation mode** — switch to API/Firebase for live hardware."
+)
+
+# ── Session state init ───────────────────────────────────────
+if "iot_history" not in st.session_state:
+    st.session_state.iot_history = []
+if "iot_auto_refresh" not in st.session_state:
+    st.session_state.iot_auto_refresh = False
+if "iot_data_source" not in st.session_state:
+    st.session_state.iot_data_source = "Simulated"
+if "iot_last_update" not in st.session_state:
+    st.session_state.iot_last_update = None
+if "iot_use_for_prediction" not in st.session_state:
+    st.session_state.iot_use_for_prediction = False
+
+# ── Sensor data fetcher ──────────────────────────────────────
+def fetch_sensor_data(source: str = "Simulated", api_url: str = "") -> dict:
+    """
+    Fetch sensor data from the configured source.
+    Returns dict with all sensor readings + timestamp.
+    Falls back to simulation on any error.
+    """
+    try:
+        if source == "REST API" and api_url:
+            r = requests.get(api_url, timeout=5)
+            r.raise_for_status()
+            d = r.json()
+            return {
+                "Soil_Moisture": float(d.get("soil_moisture", 45)),
+                "Temperature":   float(d.get("temperature",  28)),
+                "Humidity":      float(d.get("humidity",     65)),
+                "Soil_pH":       float(d.get("soil_ph",      6.8)),
+                "Nitrogen":      float(d.get("nitrogen",     120)),
+                "Phosphorus":    float(d.get("phosphorus",   50)),
+                "Potassium":     float(d.get("potassium",    40)),
+                "timestamp":     datetime.now().strftime("%H:%M:%S"),
+                "source":        "REST API",
+            }
+        # elif source == "Firebase":
+        #     # Future: integrate firebase-admin SDK
+        #     pass
+
+        # Default → realistic simulation with slight drift from previous reading
+        last = st.session_state.iot_history[-1] if st.session_state.iot_history else None
+
+        def drift(base, low, high, delta):
+            v = (last[base] if last else random.uniform(low, high)) + random.uniform(-delta, delta)
+            return round(max(low, min(high, v)), 2)
+
+        return {
+            "Soil_Moisture": drift("Soil_Moisture", 15, 85,  3),
+            "Temperature":   drift("Temperature",   18, 45,  1.5),
+            "Humidity":      drift("Humidity",      30, 95,  2.5),
+            "Soil_pH":       drift("Soil_pH",       5.0, 8.5, 0.15),
+            "Nitrogen":      drift("Nitrogen",      40, 250, 5),
+            "Phosphorus":    drift("Phosphorus",    20, 130, 3),
+            "Potassium":     drift("Potassium",     20, 130, 3),
+            "timestamp":     datetime.now().strftime("%H:%M:%S"),
+            "source":        "Simulated",
+        }
+    except Exception as e:
+        st.warning(f"⚠️ Sensor fetch error: {e}. Using fallback values.")
+        return {
+            "Soil_Moisture": 45.0, "Temperature": 28.0, "Humidity": 65.0,
+            "Soil_pH": 6.8, "Nitrogen": 120.0, "Phosphorus": 50.0, "Potassium": 40.0,
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "source": "Fallback",
+        }
+
+# ── Control panel ────────────────────────────────────────────
+ctrl1, ctrl2, ctrl3, ctrl4 = st.columns([2, 2, 1.5, 1.5])
+
+with ctrl1:
+    data_source = st.selectbox(
+        "📡 Data Source",
+        ["Simulated", "REST API", "Firebase (coming soon)"],
+        index=0,
+        help="Simulated mode generates random realistic values. Use REST API for ESP32 integration.",
+    )
+    st.session_state.iot_data_source = data_source
+
+with ctrl2:
+    api_url = ""
+    if data_source == "REST API":
+        api_url = st.text_input(
+            "🔗 API Endpoint",
+            placeholder="http://esp32.local/sensors",
+            help="ESP32 endpoint returning JSON with sensor keys.",
+        )
+    else:
+        st.text_input("🔗 API Endpoint", value="N/A", disabled=True)
+
+with ctrl3:
+    auto_refresh = st.toggle(
+        "🔄 Auto-Refresh (5s)",
+        value=st.session_state.iot_auto_refresh,
+        help="Automatically poll sensors every 5 seconds.",
+    )
+    st.session_state.iot_auto_refresh = auto_refresh
+
+with ctrl4:
+    manual_refresh = st.button("🔃 Refresh Now", use_container_width=True, type="primary")
+
+# ── Fetch sensor data ────────────────────────────────────────
+if manual_refresh or auto_refresh or not st.session_state.iot_history:
+    try:
+        new_reading = fetch_sensor_data(data_source, api_url)
+        st.session_state.iot_history.append(new_reading)
+        st.session_state.iot_last_update = new_reading["timestamp"]
+
+        # Keep only last 50 readings to limit memory
+        if len(st.session_state.iot_history) > 50:
+            st.session_state.iot_history = st.session_state.iot_history[-50:]
+    except Exception as e:
+        st.error(f"❌ Could not fetch sensor data: {e}")
+
+# ── Latest reading ───────────────────────────────────────────
+if st.session_state.iot_history:
+    latest = st.session_state.iot_history[-1]
+    prev   = st.session_state.iot_history[-2] if len(st.session_state.iot_history) >= 2 else latest
+
+    st.markdown(
+        f"**🕒 Last update:** `{latest['timestamp']}` &nbsp;|&nbsp; "
+        f"**📡 Source:** `{latest['source']}` &nbsp;|&nbsp; "
+        f"**📊 Readings stored:** `{len(st.session_state.iot_history)}`"
+    )
+
+    # ── Sensor metric cards ──────────────────────────────────
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("💧 Soil Moisture", f"{latest['Soil_Moisture']} %",
+              delta=round(latest['Soil_Moisture'] - prev['Soil_Moisture'], 2))
+    s2.metric("🌡 Temperature",   f"{latest['Temperature']} °C",
+              delta=round(latest['Temperature'] - prev['Temperature'], 2))
+    s3.metric("💨 Humidity",       f"{latest['Humidity']} %",
+              delta=round(latest['Humidity'] - prev['Humidity'], 2))
+    s4.metric("🧪 Soil pH",        f"{latest['Soil_pH']}",
+              delta=round(latest['Soil_pH'] - prev['Soil_pH'], 2))
+
+    s5, s6, s7, s8 = st.columns(4)
+    s5.metric("🟢 Nitrogen (N)",   f"{latest['Nitrogen']} kg/ha",
+              delta=round(latest['Nitrogen'] - prev['Nitrogen'], 2))
+    s6.metric("🟠 Phosphorus (P)", f"{latest['Phosphorus']} kg/ha",
+              delta=round(latest['Phosphorus'] - prev['Phosphorus'], 2))
+    s7.metric("🟣 Potassium (K)",  f"{latest['Potassium']} kg/ha",
+              delta=round(latest['Potassium'] - prev['Potassium'], 2))
+
+    # Status indicator
+    status_color = "#2e7d32"
+    status_text = "🟢 All Systems Normal"
+    if latest['Soil_Moisture'] < 30 or latest['Temperature'] > 40:
+        status_color = "#c62828"
+        status_text = "🔴 Alerts Active"
+    elif latest['Soil_pH'] < 5.5 or latest['Soil_pH'] > 7.8:
+        status_color = "#f9a825"
+        status_text = "🟡 Soil pH Out of Range"
+
+    s8.markdown(
+        f'<div style="background:{status_color}18;border-left:5px solid {status_color};'
+        f'padding:14px;border-radius:8px;text-align:center;'
+        f'color:{status_color};font-weight:700;font-size:1rem;margin-top:8px;">'
+        f'{status_text}</div>',
+        unsafe_allow_html=True,
+    )
+
+    # ── ALERT SYSTEM ─────────────────────────────────────────
+    alert_col1, alert_col2 = st.columns(2)
+    with alert_col1:
+        if latest['Soil_Moisture'] < 30:
+            st.warning("💧 **Low moisture detected — irrigation needed!** "
+                       f"Current: {latest['Soil_Moisture']}% (threshold: 30%)")
+        if latest['Soil_pH'] < 5.5:
+            st.warning(f"🧪 **Soil too acidic** — pH {latest['Soil_pH']}. Apply lime to raise pH.")
+        elif latest['Soil_pH'] > 7.8:
+            st.warning(f"🧪 **Soil too alkaline** — pH {latest['Soil_pH']}. Apply gypsum/sulfur.")
+
+    with alert_col2:
+        if latest['Temperature'] > 40:
+            st.error(f"🌡 **High temperature risk!** Current: {latest['Temperature']}°C. "
+                     "Increase irrigation, consider shade nets.")
+        if latest['Humidity'] > 90:
+            st.warning(f"💨 **Very high humidity** ({latest['Humidity']}%) — fungal disease risk.")
+
+    # ── REAL-TIME LINE CHART ─────────────────────────────────
+    if len(st.session_state.iot_history) >= 2:
+        st.markdown("#### 📈 Sensor Trends Over Time")
+
+        try:
+            hist_df = pd.DataFrame(st.session_state.iot_history)
+
+            chart_tab1, chart_tab2 = st.tabs(["🌡 Environmental", "🧪 Soil Nutrients"])
+
+            with chart_tab1:
+                fig_env = go.Figure()
+                fig_env.add_trace(go.Scatter(
+                    x=hist_df["timestamp"], y=hist_df["Soil_Moisture"],
+                    mode="lines+markers", name="Soil Moisture (%)",
+                    line=dict(color="#1565c0", width=2),
+                ))
+                fig_env.add_trace(go.Scatter(
+                    x=hist_df["timestamp"], y=hist_df["Temperature"],
+                    mode="lines+markers", name="Temperature (°C)",
+                    line=dict(color="#e53935", width=2),
+                ))
+                fig_env.add_trace(go.Scatter(
+                    x=hist_df["timestamp"], y=hist_df["Humidity"],
+                    mode="lines+markers", name="Humidity (%)",
+                    line=dict(color="#43a047", width=2),
+                ))
+                fig_env.add_trace(go.Scatter(
+                    x=hist_df["timestamp"], y=hist_df["Soil_pH"] * 10,  # scaled for visibility
+                    mode="lines+markers", name="Soil pH (×10)",
+                    line=dict(color="#6a1b9a", width=2, dash="dot"),
+                ))
+                fig_env.update_layout(
+                    title="Environmental Sensor Trends",
+                    xaxis_title="Timestamp", yaxis_title="Value",
+                    height=380, plot_bgcolor="white", hovermode="x unified",
+                )
+                st.plotly_chart(fig_env, use_container_width=True)
+
+            with chart_tab2:
+                fig_npk = go.Figure()
+                fig_npk.add_trace(go.Scatter(
+                    x=hist_df["timestamp"], y=hist_df["Nitrogen"],
+                    mode="lines+markers", name="Nitrogen (N)",
+                    line=dict(color="#2e7d32", width=2),
+                ))
+                fig_npk.add_trace(go.Scatter(
+                    x=hist_df["timestamp"], y=hist_df["Phosphorus"],
+                    mode="lines+markers", name="Phosphorus (P)",
+                    line=dict(color="#e65100", width=2),
+                ))
+                fig_npk.add_trace(go.Scatter(
+                    x=hist_df["timestamp"], y=hist_df["Potassium"],
+                    mode="lines+markers", name="Potassium (K)",
+                    line=dict(color="#6a1b9a", width=2),
+                ))
+                fig_npk.update_layout(
+                    title="Soil Nutrient Trends (kg/ha)",
+                    xaxis_title="Timestamp", yaxis_title="Concentration (kg/ha)",
+                    height=380, plot_bgcolor="white", hovermode="x unified",
+                )
+                st.plotly_chart(fig_npk, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"⚠️ Could not render trend chart: {e}")
+
+    # ── USE SENSOR DATA FOR PREDICTION ───────────────────────
+    st.markdown("---")
+    use_iot = st.checkbox(
+        "🔗 **Use live IoT sensor data for fertilizer prediction**",
+        value=st.session_state.iot_use_for_prediction,
+        help="When enabled, the latest sensor readings will override sidebar inputs for the AI prediction.",
+    )
+    st.session_state.iot_use_for_prediction = use_iot
+
+    if use_iot:
+        # Push sensor values into session state so the prediction section can pick them up
+        st.session_state["iot_N"]        = latest["Nitrogen"]
+        st.session_state["iot_P"]        = latest["Phosphorus"]
+        st.session_state["iot_K"]        = latest["Potassium"]
+        st.session_state["iot_pH"]       = latest["Soil_pH"]
+        st.session_state["iot_moisture"] = latest["Soil_Moisture"]
+        st.session_state["iot_temp"]     = latest["Temperature"]
+        st.session_state["iot_humidity"] = latest["Humidity"]
+
+        st.success(
+            f"✅ Live sensor data linked to AI prediction engine. "
+            f"N={latest['Nitrogen']} | P={latest['Phosphorus']} | K={latest['Potassium']} | "
+            f"pH={latest['Soil_pH']} | Moisture={latest['Soil_Moisture']}%"
+        )
+
+    # ── Raw data expander ────────────────────────────────────
+    with st.expander("📋 View Raw Sensor History"):
+        st.dataframe(
+            pd.DataFrame(st.session_state.iot_history[::-1]),  # newest first
+            use_container_width=True, hide_index=True,
+        )
+        if st.button("🗑 Clear Sensor History", key="clear_iot"):
+            st.session_state.iot_history = []
+            st.rerun()
+
+else:
+    st.info("📡 Waiting for sensor data... Click **Refresh Now** to start.")
+
+# ── Auto-refresh trigger (5 seconds) ─────────────────────────
+if st.session_state.iot_auto_refresh:
+    time.sleep(5)
+    try:
+        st.rerun()                # Streamlit ≥ 1.27
+    except AttributeError:
+        st.experimental_rerun()   # Older versions
+
+st.divider()
 
 
+# break
 import os
 import requests
 import streamlit as st
