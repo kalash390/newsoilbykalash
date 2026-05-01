@@ -1462,8 +1462,6 @@ from sklearn.metrics import accuracy_score, classification_report
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
 # ─────────────────────────────────────────────────────────────
-# .streamlit/secrets.toml  (on Streamlit Cloud: Settings → Secrets)
-OWM_API_KEY = "cb81120197f345ae396cd0fa28c1827c"
 
 st.set_page_config(
     page_title="SoilSense: Smart Fertilizer Advisory System",
@@ -1563,6 +1561,8 @@ CITY_COORDS = {
 
 def get_api_key() -> str:
     """Read OWM_API_KEY from st.secrets, then env, then return empty string."""
+    OWM_API_KEY = "cb81120197f345ae396cd0fa28c1827c"
+
     try:
         return st.secrets["OWM_API_KEY"]
     except Exception:
