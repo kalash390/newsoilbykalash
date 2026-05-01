@@ -857,6 +857,595 @@
 
 
 
+# import os
+# import requests
+# import streamlit as st
+# import pandas as pd
+# import numpy as np
+# import plotly.express as px
+# import plotly.graph_objects as go
+# import folium
+# from streamlit_folium import st_folium
+# from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+# from sklearn.model_selection import train_test_split
+# from sklearn.metrics import accuracy_score, classification_report
+# from sklearn.preprocessing import LabelEncoder
+
+# # ─────────────────────────────────────────────────────────────
+# # PAGE CONFIG
+# # ─────────────────────────────────────────────────────────────
+
+# st.set_page_config(
+#     page_title="SoilSense: Smart Fertilizer Advisory System",
+#     page_icon="🌱",
+#     layout="wide",
+# )
+
+# # Custom CSS
+# st.markdown("""
+# <style>
+#     .main-header {
+#         background: linear-gradient(135deg, #1b5e20, #388e3c);
+#         padding: 20px 28px;
+#         border-radius: 12px;
+#         margin-bottom: 24px;
+#     }
+#     .main-header h1 { color: white; margin: 0; font-size: 2rem; }
+#     .main-header p  { color: #c8e6c9; margin: 4px 0 0; font-size: 1rem; }
+#     .status-banner {
+#         padding: 14px 20px;
+#         border-radius: 8px;
+#         margin: 14px 0;
+#         font-size: 18px;
+#         font-weight: 600;
+#     }
+#     .section-title {
+#         font-size: 1.2rem;
+#         font-weight: 700;
+#         color: #1b5e20;
+#         border-bottom: 2px solid #a5d6a7;
+#         padding-bottom: 6px;
+#         margin: 20px 0 14px;
+#     }
+# </style>
+# """, unsafe_allow_html=True)
+
+# st.markdown("""
+# <div class="main-header">
+#     <h1>🌱 SoilSense: Smart Fertilizer Advisory System</h1>
+#     <p>AI-powered soil analysis · Fertilizer recommendation · Yield prediction for Indian agriculture</p>
+# </div>
+# """, unsafe_allow_html=True)
+
+# # ─────────────────────────────────────────────────────────────
+# # CONSTANTS
+# # ─────────────────────────────────────────────────────────────
+
+# DATASET_FILE   = "improved_balanced_dataset_5000.xlsx"
+# CITIES         = ["Gorakhpur", "Lucknow", "Varanasi", "Delhi", "Mumbai", "Patna",
+#                    "Ludhiana", "Amritsar", "Chandigarh", "Jaipur", "Bhopal", "Nagpur"]
+# BASELINE_YIELD = 2.5      # tons/hectare
+# CHEM_REDUCTION = 0.30     # 30% chemical reduction
+# OWM_API_KEY    = os.getenv("OWM_API_KEY", "")
+
+# FEATURES = [
+#     "Nitrogen", "Phosphorus", "Potassium",
+#     "Temperature", "Humidity", "Rainfall",
+#     "pH", "Soil_Moisture",
+#     "Soil_Quality_Index", "NPK_Ratio", "Weather_Index",
+# ]
+
+# FERT_COLORS = {
+#     "Urea":   "#1565c0",
+#     "DAP":    "#e65100",
+#     "NPK":    "#2e7d32",
+#     "Potash": "#6a1b9a",
+# }
+
+# # ─────────────────────────────────────────────────────────────
+# # WEATHER
+# # ─────────────────────────────────────────────────────────────
+
+# def get_weather(city: str) -> tuple:
+#     try:
+#         if not OWM_API_KEY:
+#             raise ValueError("No API key")
+#         url = (f"https://api.openweathermap.org/data/2.5/weather"
+#                f"?q={city},IN&appid={OWM_API_KEY}&units=metric")
+#         r = requests.get(url, timeout=5)
+#         r.raise_for_status()
+#         d = r.json()
+#         return (
+#             round(d["main"]["temp"], 1),
+#             round(d["main"]["humidity"], 1),
+#             round(d.get("rain", {}).get("1h", 0.0), 2),
+#         )
+#     except Exception:
+#         return 28.0, 65.0, 0.0
+
+# # ─────────────────────────────────────────────────────────────
+# # DATA LOADING
+# # ─────────────────────────────────────────────────────────────
+
+# @st.cache_data
+# def load_data() -> pd.DataFrame:
+#     paths = [DATASET_FILE, f"data/{DATASET_FILE}", f"/app/{DATASET_FILE}"]
+#     for p in paths:
+#         if os.path.exists(p):
+#             df = pd.read_excel(p)
+#             df.columns = df.columns.str.strip()
+#             return df
+#     st.error(
+#         f"❌ Dataset not found: **{DATASET_FILE}**\n\n"
+#         "Place `improved_balanced_dataset_5000.xlsx` in the same folder as `app.py`."
+#     )
+#     st.stop()
+
+# # ─────────────────────────────────────────────────────────────
+# # MODEL TRAINING
+# # ─────────────────────────────────────────────────────────────
+
+# @st.cache_resource
+# def train_models(data: pd.DataFrame):
+#     X = data[FEATURES]
+#     y = data["Recommended_Chemical"]
+
+#     # Stratified split — balanced dataset guarantees ≥2 samples per class
+#     X_train, X_test, y_train, y_test = train_test_split(
+#         X, y, test_size=0.2, random_state=42, stratify=y
+#     )
+
+#     # Classifier
+#     clf = RandomForestClassifier(
+#         n_estimators=200,
+#         max_depth=15,
+#         min_samples_leaf=4,
+#         min_samples_split=8,
+#         max_features="sqrt",
+#         random_state=42,
+#         class_weight="balanced",
+#     )
+#     clf.fit(X_train, y_train)
+#     y_pred   = clf.predict(X_test)
+#     accuracy = accuracy_score(y_test, y_pred)
+#     report   = classification_report(y_test, y_pred, output_dict=True)
+
+#     # Yield regressor
+#     reg = RandomForestRegressor(
+#         n_estimators=200,
+#         max_depth=15,
+#         min_samples_leaf=4,
+#         random_state=42,
+#     )
+#     reg.fit(X, data["Yield"])
+
+#     # Feature importances
+#     importances = pd.Series(clf.feature_importances_, index=FEATURES).sort_values(ascending=False)
+
+#     return clf, reg, round(accuracy * 100, 2), report, importances
+
+# # ─────────────────────────────────────────────────────────────
+# # HELPERS
+# # ─────────────────────────────────────────────────────────────
+
+# def soil_status(score: float):
+#     if score >= 150: return "Excellent 🟢", "#2e7d32"
+#     if score >= 100: return "Good 🟡",      "#f9a825"
+#     return              "Poor 🔴",          "#c62828"
+
+
+# def compute_derived(n, p, k, temp, humidity, rainfall):
+#     denom = (p + k) if (p + k) > 0 else 0.001
+#     return {
+#         "Soil_Quality_Index": round((n + p + k) / 3, 2),
+#         "NPK_Ratio":          round(n / denom, 4),
+#         "Weather_Index":      round((temp + humidity + rainfall) / 3, 2),
+#     }
+
+
+# def before_after_df(n, p, k):
+#     r = 1 - CHEM_REDUCTION
+#     return pd.DataFrame({
+#         "Nutrient":    ["Nitrogen (N)", "Phosphorus (P)", "Potassium (K)"],
+#         "Before (kg/ha)": [round(n,2), round(p,2), round(k,2)],
+#         "After (kg/ha)":  [round(n*r,2), round(p*r,2), round(k*r,2)],
+#         "Saved (kg/ha)":  [round(n*CHEM_REDUCTION,2),
+#                            round(p*CHEM_REDUCTION,2),
+#                            round(k*CHEM_REDUCTION,2)],
+#         "Reduction":   [f"{int(CHEM_REDUCTION*100)}%"] * 3,
+#     })
+
+# # ─────────────────────────────────────────────────────────────
+# # LOAD + TRAIN
+# # ─────────────────────────────────────────────────────────────
+
+# data = load_data()
+
+# # Final safety clean
+# for col in FEATURES + ["Yield"]:
+#     if col in data.columns:
+#         data[col] = pd.to_numeric(data[col], errors="coerce")
+#         data[col] = data[col].fillna(data[col].median())
+
+# data = data.dropna(subset=["Recommended_Chemical"]).reset_index(drop=True)
+# data["Recommended_Chemical"] = data["Recommended_Chemical"].astype(str).str.strip()
+
+# try:
+#     clf, reg, accuracy, report, importances = train_models(data)
+# except Exception as e:
+#     st.error(f"❌ Model training failed: {e}")
+#     st.stop()
+
+# # ─────────────────────────────────────────────────────────────
+# # SESSION STATE
+# # ─────────────────────────────────────────────────────────────
+
+# _defaults = dict(
+#     done=False,
+#     city=None, temp=None, hum=None, rain=None,
+#     chemical=None, organic=None, crop_input=None,
+#     soil_score=None, soil_label=None, soil_color=None,
+#     yield_pred=None, yield_impr=None,
+#     N=None, P=None, K=None,
+#     pH=None, moisture=None,
+#     derived=None, proba=None,
+# )
+# for k, v in _defaults.items():
+#     if k not in st.session_state:
+#         st.session_state[k] = v
+
+# # ─────────────────────────────────────────────────────────────
+# # HEADER METRICS  (always visible)
+# # ─────────────────────────────────────────────────────────────
+
+# m1, m2, m3, m4, m5 = st.columns(5)
+# m1.metric("🎯 Model Accuracy",     f"{accuracy}%")
+# m2.metric("🌾 Fertilizer Classes", data["Recommended_Chemical"].nunique())
+# m3.metric("📁 Training Samples",   f"{len(data):,}")
+# m4.metric("🧬 Feature Count",      len(FEATURES))
+# m5.metric("🌿 Crop Types",         data["Crop"].nunique())
+
+# st.divider()
+
+# # ─────────────────────────────────────────────────────────────
+# # SIDEBAR
+# # ─────────────────────────────────────────────────────────────
+
+# st.sidebar.markdown("## 🌾 Soil & Location Inputs")
+
+# city       = st.sidebar.selectbox("📍 City", CITIES)
+# crop_input = st.sidebar.selectbox("🌱 Crop", sorted(data["Crop"].unique()))
+
+# st.sidebar.markdown("**Soil Nutrients (kg/ha)**")
+# N = st.sidebar.slider("Nitrogen (N)",   0, 300, 120)
+# P = st.sidebar.slider("Phosphorus (P)", 0, 150, 50)
+# K = st.sidebar.slider("Potassium (K)",  0, 150, 40)
+
+# st.sidebar.markdown("**Soil Properties**")
+# pH       = st.sidebar.slider("pH",           4.5, 8.5, 6.8, step=0.1)
+# moisture = st.sidebar.slider("Soil Moisture (%)", 10, 80, 45)
+
+# st.sidebar.markdown("**Weather (manual override)**")
+# temp_in = st.sidebar.number_input("Temperature (°C)", 10, 45, 28)
+# hum_in  = st.sidebar.number_input("Humidity (%)",     20, 100, 65)
+# rain_in = st.sidebar.number_input("Rainfall (mm)",    0,  500, 50)
+
+# predict_btn = st.sidebar.button("🔍 Predict", use_container_width=True, type="primary")
+
+# st.sidebar.divider()
+# st.sidebar.markdown(
+#     "**Soil Score Guide**\n"
+#     "- 🟢 Excellent ≥ 150\n"
+#     "- 🟡 Good ≥ 100\n"
+#     "- 🔴 Poor < 100\n\n"
+#     "**Yield baseline:** 2.5 t/ha"
+# )
+
+# # ─────────────────────────────────────────────────────────────
+# # PREDICTION
+# # ─────────────────────────────────────────────────────────────
+
+# if predict_btn:
+#     try:
+#         # Fetch live weather (fallback to manual inputs)
+#         live_temp, live_hum, live_rain = get_weather(city)
+#         use_temp = live_temp if OWM_API_KEY else temp_in
+#         use_hum  = live_hum  if OWM_API_KEY else hum_in
+#         use_rain = live_rain if OWM_API_KEY else rain_in
+
+#         derived = compute_derived(N, P, K, use_temp, use_hum, use_rain)
+
+#         input_df = pd.DataFrame([[
+#             N, P, K, use_temp, use_hum, use_rain,
+#             pH, moisture,
+#             derived["Soil_Quality_Index"],
+#             derived["NPK_Ratio"],
+#             derived["Weather_Index"],
+#         ]], columns=FEATURES)
+
+#         chemical = clf.predict(input_df)[0]
+#         proba_arr = clf.predict_proba(input_df)[0]
+#         proba = dict(zip(clf.classes_, np.round(proba_arr * 100, 1)))
+
+#         org_match = data[data["Recommended_Chemical"] == chemical]["Recommended_Organic"]
+#         organic   = org_match.iloc[0] if not org_match.empty else "Compost"
+
+#         soil_score        = round(0.4*N + 0.3*P + 0.3*K, 2)
+#         label, color      = soil_status(soil_score)
+#         yield_pred        = round(reg.predict(input_df)[0], 2)
+#         yield_pred        = float(np.clip(yield_pred, 1.0, 8.0))
+#         yield_impr        = round((yield_pred - BASELINE_YIELD) / BASELINE_YIELD * 100, 1)
+
+#         st.session_state.update(dict(
+#             done=True,
+#             city=city, temp=use_temp, hum=use_hum, rain=use_rain,
+#             chemical=chemical, organic=organic, crop_input=crop_input,
+#             soil_score=soil_score, soil_label=label, soil_color=color,
+#             yield_pred=yield_pred, yield_impr=yield_impr,
+#             N=N, P=P, K=K, pH=pH, moisture=moisture,
+#             derived=derived, proba=proba,
+#         ))
+
+#     except Exception as e:
+#         st.error(f"❌ Prediction error: {e}")
+
+# # ─────────────────────────────────────────────────────────────
+# # RESULTS
+# # ─────────────────────────────────────────────────────────────
+
+# if st.session_state.done:
+#     ss = st.session_state
+
+#     # ── WEATHER ──────────────────────────────────────────────
+#     st.markdown('<div class="section-title">🌤 Current Weather Conditions</div>',
+#                 unsafe_allow_html=True)
+#     w1, w2, w3 = st.columns(3)
+#     w1.metric("🌡 Temperature", f"{ss.temp} °C")
+#     w2.metric("💧 Humidity",    f"{ss.hum} %")
+#     w3.metric("🌧 Rainfall",    f"{ss.rain} mm")
+
+#     st.divider()
+
+#     # ── CORE PREDICTIONS ─────────────────────────────────────
+#     st.markdown('<div class="section-title">✅ AI Fertilizer Recommendation</div>',
+#                 unsafe_allow_html=True)
+#     r1, r2, r3, r4, r5, r6 = st.columns(6)
+#     r1.metric("⚗️ Chemical",       ss.chemical)
+#     r2.metric("🌿 Organic",        ss.organic)
+#     r3.metric("🧮 Soil Score",     ss.soil_score)
+#     r4.metric("🌾 Predicted Yield",f"{ss.yield_pred} t/ha")
+#     r5.metric("📈 Yield vs Base",  f"{ss.yield_impr}%",
+#               delta=f"baseline {BASELINE_YIELD} t/ha")
+#     r6.metric("🌱 Crop",          ss.crop_input)
+
+#     # Soil health banner
+#     st.markdown(
+#         f'<div class="status-banner" '
+#         f'style="background:{ss.soil_color}18;border-left:6px solid {ss.soil_color};'
+#         f'color:{ss.soil_color};">'
+#         f'🌱 Soil Health Status: {ss.soil_label}'
+#         f'</div>',
+#         unsafe_allow_html=True,
+#     )
+
+#     # Derived features callout
+#     d = ss.derived
+#     d1, d2, d3 = st.columns(3)
+#     d1.metric("⚖️ NPK Ratio",          d["NPK_Ratio"])
+#     d2.metric("🧪 Soil Quality Index",  d["Soil_Quality_Index"])
+#     d3.metric("🌦 Weather Index",       d["Weather_Index"])
+
+#     st.divider()
+
+#     # ── CONFIDENCE CHART ─────────────────────────────────────
+#     st.markdown('<div class="section-title">📊 Prediction Confidence</div>',
+#                 unsafe_allow_html=True)
+
+#     proba_df = (
+#         pd.DataFrame(ss.proba.items(), columns=["Fertilizer", "Confidence (%)"])
+#         .sort_values("Confidence (%)", ascending=False)
+#     )
+#     proba_df["Color"] = proba_df["Fertilizer"].map(FERT_COLORS).fillna("#78909c")
+
+#     fig_conf = go.Figure(go.Bar(
+#         x=proba_df["Fertilizer"],
+#         y=proba_df["Confidence (%)"],
+#         marker_color=proba_df["Color"].tolist(),
+#         text=proba_df["Confidence (%)"].apply(lambda x: f"{x}%"),
+#         textposition="outside",
+#     ))
+#     fig_conf.update_layout(
+#         title="Model Confidence per Fertilizer Class",
+#         yaxis_title="Confidence (%)",
+#         yaxis_range=[0, 110],
+#         height=360,
+#         plot_bgcolor="white",
+#         showlegend=False,
+#     )
+#     st.plotly_chart(fig_conf, use_container_width=True)
+
+#     st.divider()
+
+#     # ── BEFORE vs AFTER ──────────────────────────────────────
+#     st.markdown(
+#         f'<div class="section-title">🔄 Before vs After — {int(CHEM_REDUCTION*100)}% Chemical Reduction</div>',
+#         unsafe_allow_html=True,
+#     )
+
+#     ba_df = before_after_df(ss.N, ss.P, ss.K)
+#     st.dataframe(ba_df, use_container_width=True, hide_index=True)
+
+#     ratio = 1 - CHEM_REDUCTION
+#     ba_chart = pd.DataFrame({
+#         "Nutrient": ["N", "P", "K", "N", "P", "K"],
+#         "Value":    [ss.N, ss.P, ss.K,
+#                      round(ss.N*ratio,2), round(ss.P*ratio,2), round(ss.K*ratio,2)],
+#         "Phase":    ["Before"]*3 + ["After"]*3,
+#     })
+#     fig_ba = px.bar(
+#         ba_chart, x="Nutrient", y="Value", color="Phase", barmode="group",
+#         color_discrete_map={"Before": "#e53935", "After": "#43a047"},
+#         text="Value",
+#         title="NPK Before vs After Chemical Fertilizer Replacement",
+#         labels={"Value": "Amount (kg/ha)"},
+#     )
+#     fig_ba.update_traces(textposition="outside")
+#     fig_ba.update_layout(height=400, plot_bgcolor="white")
+#     st.plotly_chart(fig_ba, use_container_width=True)
+
+#     st.divider()
+
+#     # ── NPK PROFILE ───────────────────────────────────────────
+#     st.markdown('<div class="section-title">📈 Soil Nutrient Profile</div>',
+#                 unsafe_allow_html=True)
+
+#     fig_npk = px.bar(
+#         pd.DataFrame({
+#             "Nutrient": ["Nitrogen", "Phosphorus", "Potassium"],
+#             "Value":    [ss.N, ss.P, ss.K],
+#             "Optimal":  [150,  75,   75],
+#         }),
+#         x="Nutrient", y=["Value", "Optimal"],
+#         barmode="group",
+#         color_discrete_map={"Value": "#2e7d32", "Optimal": "#a5d6a7"},
+#         text_auto=True,
+#         title="Your Soil Nutrients vs Optimal Levels (kg/ha)",
+#     )
+#     fig_npk.update_layout(height=380, plot_bgcolor="white")
+#     st.plotly_chart(fig_npk, use_container_width=True)
+
+# else:
+#     st.info("👈 Enter soil values in the sidebar and click **Predict** to generate your full advisory report.")
+
+# # ─────────────────────────────────────────────────────────────
+# # DATASET INSIGHTS  (always visible)
+# # ─────────────────────────────────────────────────────────────
+
+# st.divider()
+# tab1, tab2, tab3 = st.tabs(["📊 Fertilizer Distribution", "🌾 Feature Importance", "📋 Dataset Sample"])
+
+# with tab1:
+#     col_a, col_b = st.columns(2)
+
+#     with col_a:
+#         dist_df = data["Recommended_Chemical"].value_counts().reset_index()
+#         dist_df.columns = ["Fertilizer", "Count"]
+#         dist_df["Color"] = dist_df["Fertilizer"].map(FERT_COLORS).fillna("#78909c")
+#         fig_dist = go.Figure(go.Bar(
+#             x=dist_df["Fertilizer"], y=dist_df["Count"],
+#             marker_color=dist_df["Color"].tolist(),
+#             text=dist_df["Count"], textposition="outside",
+#         ))
+#         fig_dist.update_layout(
+#             title="Fertilizer Class Distribution (Balanced)",
+#             height=380, plot_bgcolor="white", showlegend=False,
+#         )
+#         st.plotly_chart(fig_dist, use_container_width=True)
+
+#     with col_b:
+#         crop_dist = data["Crop"].value_counts().reset_index()
+#         crop_dist.columns = ["Crop", "Count"]
+#         fig_crop = px.pie(
+#             crop_dist, names="Crop", values="Count",
+#             title="Crop Type Distribution",
+#             color_discrete_sequence=px.colors.sequential.Greens_r,
+#             hole=0.35,
+#         )
+#         fig_crop.update_layout(height=380)
+#         st.plotly_chart(fig_crop, use_container_width=True)
+
+#     # Yield distribution
+#     fig_yield = px.histogram(
+#         data, x="Yield", color="Recommended_Chemical",
+#         color_discrete_map=FERT_COLORS,
+#         nbins=40,
+#         title="Yield Distribution by Fertilizer Type (t/ha)",
+#         labels={"Yield": "Yield (t/ha)", "count": "Frequency"},
+#         barmode="overlay",
+#         opacity=0.7,
+#     )
+#     fig_yield.update_layout(height=380, plot_bgcolor="white")
+#     st.plotly_chart(fig_yield, use_container_width=True)
+
+# with tab2:
+#     imp_df = importances.reset_index()
+#     imp_df.columns = ["Feature", "Importance"]
+#     fig_imp = px.bar(
+#         imp_df, x="Importance", y="Feature",
+#         orientation="h",
+#         color="Importance",
+#         color_continuous_scale="Greens",
+#         text=imp_df["Importance"].round(3),
+#         title="RandomForest Feature Importances",
+#     )
+#     fig_imp.update_traces(textposition="outside")
+#     fig_imp.update_layout(
+#         height=480, plot_bgcolor="white",
+#         yaxis={"categoryorder": "total ascending"},
+#         coloraxis_showscale=False,
+#     )
+#     st.plotly_chart(fig_imp, use_container_width=True)
+
+#     # Scatter: N vs P coloured by fertilizer
+#     fig_scatter = px.scatter(
+#         data.sample(1000, random_state=1),
+#         x="Nitrogen", y="Phosphorus",
+#         color="Recommended_Chemical",
+#         color_discrete_map=FERT_COLORS,
+#         opacity=0.6,
+#         title="Nitrogen vs Phosphorus (sample 1000 rows)",
+#         hover_data=["Crop", "Yield"],
+#     )
+#     fig_scatter.update_layout(height=420, plot_bgcolor="white")
+#     st.plotly_chart(fig_scatter, use_container_width=True)
+
+# with tab3:
+#     st.dataframe(
+#         data.sample(20, random_state=7).reset_index(drop=True),
+#         use_container_width=True,
+#     )
+#     st.caption(f"Showing 20 random rows from {len(data):,} total training samples.")
+
+# # ─────────────────────────────────────────────────────────────
+# # FARM MAP  (always visible)
+# # ─────────────────────────────────────────────────────────────
+
+# st.divider()
+# st.markdown('<div class="section-title">🗺️ Farm Location Map</div>', unsafe_allow_html=True)
+
+# farm_map = folium.Map(location=[26.7606, 83.3732], zoom_start=6)
+# folium.Marker(
+#     [26.7606, 83.3732],
+#     popup=folium.Popup(
+#         "<b>📍 Farm Location</b><br>Lat: 26.7606 | Lon: 83.3732<br>Region: Gorakhpur, UP",
+#         max_width=240,
+#     ),
+#     icon=folium.Icon(color="green", icon="leaf", prefix="fa"),
+# ).add_to(farm_map)
+
+# # Add city markers
+# city_coords = {
+#     "Gorakhpur":  [26.7606, 83.3732],
+#     "Lucknow":    [26.8467, 80.9462],
+#     "Varanasi":   [25.3176, 82.9739],
+#     "Delhi":      [28.6139, 77.2090],
+#     "Patna":      [25.5941, 85.1376],
+#     "Ludhiana":   [30.9010, 75.8573],
+#     "Amritsar":   [31.6340, 74.8723],
+# }
+# for city_name, coords in city_coords.items():
+#     folium.CircleMarker(
+#         coords, radius=5, color="#1b5e20", fill=True,
+#         fill_color="#4caf50", fill_opacity=0.7,
+#         popup=city_name,
+#     ).add_to(farm_map)
+
+# st_folium(farm_map, width=700, height=500)
+
+# st.caption("SoilSense · Powered by RandomForest AI · Dataset: improved_balanced_dataset_5000.xlsx · Built with Streamlit 🌱")
+
+
+
 import os
 import requests
 import streamlit as st
@@ -869,7 +1458,6 @@ from streamlit_folium import st_folium
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, classification_report
-from sklearn.preprocessing import LabelEncoder
 
 # ─────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -881,7 +1469,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Custom CSS
 st.markdown("""
 <style>
     .main-header {
@@ -892,20 +1479,19 @@ st.markdown("""
     }
     .main-header h1 { color: white; margin: 0; font-size: 2rem; }
     .main-header p  { color: #c8e6c9; margin: 4px 0 0; font-size: 1rem; }
-    .status-banner {
-        padding: 14px 20px;
-        border-radius: 8px;
-        margin: 14px 0;
-        font-size: 18px;
-        font-weight: 600;
+    .status-banner  {
+        padding: 14px 20px; border-radius: 8px;
+        margin: 14px 0; font-size: 18px; font-weight: 600;
     }
-    .section-title {
-        font-size: 1.2rem;
-        font-weight: 700;
-        color: #1b5e20;
+    .section-title  {
+        font-size: 1.15rem; font-weight: 700; color: #1b5e20;
         border-bottom: 2px solid #a5d6a7;
-        padding-bottom: 6px;
-        margin: 20px 0 14px;
+        padding-bottom: 6px; margin: 20px 0 14px;
+    }
+    .weather-card   {
+        background: #e8f5e9; border-radius: 10px;
+        padding: 14px 18px; margin-bottom: 10px;
+        border-left: 5px solid #2e7d32;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -913,7 +1499,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1>🌱 SoilSense: Smart Fertilizer Advisory System</h1>
-    <p>AI-powered soil analysis · Fertilizer recommendation · Yield prediction for Indian agriculture</p>
+    <p>AI-powered soil analysis · Live weather integration · Fertilizer recommendation · Yield prediction</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -922,11 +1508,15 @@ st.markdown("""
 # ─────────────────────────────────────────────────────────────
 
 DATASET_FILE   = "improved_balanced_dataset_5000.xlsx"
-CITIES         = ["Gorakhpur", "Lucknow", "Varanasi", "Delhi", "Mumbai", "Patna",
-                   "Ludhiana", "Amritsar", "Chandigarh", "Jaipur", "Bhopal", "Nagpur"]
-BASELINE_YIELD = 2.5      # tons/hectare
-CHEM_REDUCTION = 0.30     # 30% chemical reduction
-OWM_API_KEY    = os.getenv("OWM_API_KEY", "")
+BASELINE_YIELD = 2.5
+CHEM_REDUCTION = 0.30
+
+CITIES = [
+    "Gorakhpur", "Lucknow", "Varanasi", "Delhi", "Mumbai",
+    "Patna", "Ludhiana", "Amritsar", "Chandigarh", "Jaipur",
+    "Bhopal", "Nagpur", "Agra", "Meerut", "Kanpur",
+    "Allahabad", "Dehradun", "Ranchi", "Kolkata", "Hyderabad",
+]
 
 FEATURES = [
     "Nitrogen", "Phosphorus", "Potassium",
@@ -942,26 +1532,77 @@ FERT_COLORS = {
     "Potash": "#6a1b9a",
 }
 
+CITY_COORDS = {
+    "Gorakhpur":  [26.7606, 83.3732],
+    "Lucknow":    [26.8467, 80.9462],
+    "Varanasi":   [25.3176, 82.9739],
+    "Delhi":      [28.6139, 77.2090],
+    "Mumbai":     [19.0760, 72.8777],
+    "Patna":      [25.5941, 85.1376],
+    "Ludhiana":   [30.9010, 75.8573],
+    "Amritsar":   [31.6340, 74.8723],
+    "Chandigarh": [30.7333, 76.7794],
+    "Jaipur":     [26.9124, 75.7873],
+    "Bhopal":     [23.2599, 77.4126],
+    "Nagpur":     [21.1458, 79.0882],
+    "Agra":       [27.1767, 78.0081],
+    "Meerut":     [28.9845, 77.7064],
+    "Kanpur":     [26.4499, 80.3319],
+    "Allahabad":  [25.4358, 81.8463],
+    "Dehradun":   [30.3165, 78.0322],
+    "Ranchi":     [23.3441, 85.3096],
+    "Kolkata":    [22.5726, 88.3639],
+    "Hyderabad":  [17.3850, 78.4867],
+}
+
 # ─────────────────────────────────────────────────────────────
-# WEATHER
+# API KEY — read from Streamlit secrets
 # ─────────────────────────────────────────────────────────────
 
-def get_weather(city: str) -> tuple:
+def get_api_key() -> str:
+    """Read OWM_API_KEY from st.secrets, then env, then return empty string."""
     try:
-        if not OWM_API_KEY:
-            raise ValueError("No API key")
-        url = (f"https://api.openweathermap.org/data/2.5/weather"
-               f"?q={city},IN&appid={OWM_API_KEY}&units=metric")
-        r = requests.get(url, timeout=5)
-        r.raise_for_status()
-        d = r.json()
-        return (
-            round(d["main"]["temp"], 1),
-            round(d["main"]["humidity"], 1),
-            round(d.get("rain", {}).get("1h", 0.0), 2),
-        )
+        return st.secrets["OWM_API_KEY"]
     except Exception:
-        return 28.0, 65.0, 0.0
+        return os.getenv("OWM_API_KEY", "")
+
+# ─────────────────────────────────────────────────────────────
+# WEATHER FETCH
+# ─────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=1800)   # cache 30 min so repeated reruns don't hammer the API
+def get_weather(city: str, api_key: str) -> dict:
+    """
+    Fetch live weather from OpenWeatherMap.
+    Returns dict with temperature, humidity, rainfall, description, icon_url.
+    Falls back to None values on any error so caller can show a warning.
+    """
+    if not api_key:
+        return {"error": "No API key configured in Streamlit secrets."}
+
+    try:
+        url = (
+            f"https://api.openweathermap.org/data/2.5/weather"
+            f"?q={city},IN&appid={api_key}&units=metric"
+        )
+        resp = requests.get(url, timeout=6)
+        resp.raise_for_status()
+        d = resp.json()
+
+        return {
+            "temperature":   round(d["main"]["temp"], 1),
+            "feels_like":    round(d["main"]["feels_like"], 1),
+            "humidity":      round(d["main"]["humidity"], 1),
+            "rainfall":      round(d.get("rain", {}).get("1h", 0.0), 2),
+            "description":   d["weather"][0]["description"].title(),
+            "icon_url":      f"https://openweathermap.org/img/wn/{d['weather'][0]['icon']}@2x.png",
+            "wind_speed":    round(d["wind"]["speed"], 1),
+            "error":         None,
+        }
+    except requests.exceptions.HTTPError as e:
+        return {"error": f"API error ({resp.status_code}): {e}"}
+    except Exception as e:
+        return {"error": str(e)}
 
 # ─────────────────────────────────────────────────────────────
 # DATA LOADING
@@ -969,14 +1610,13 @@ def get_weather(city: str) -> tuple:
 
 @st.cache_data
 def load_data() -> pd.DataFrame:
-    paths = [DATASET_FILE, f"data/{DATASET_FILE}", f"/app/{DATASET_FILE}"]
-    for p in paths:
-        if os.path.exists(p):
-            df = pd.read_excel(p)
+    for path in [DATASET_FILE, f"data/{DATASET_FILE}"]:
+        if os.path.exists(path):
+            df = pd.read_excel(path)
             df.columns = df.columns.str.strip()
             return df
     st.error(
-        f"❌ Dataset not found: **{DATASET_FILE}**\n\n"
+        f"❌ Dataset **{DATASET_FILE}** not found.\n\n"
         "Place `improved_balanced_dataset_5000.xlsx` in the same folder as `app.py`."
     )
     st.stop()
@@ -990,37 +1630,29 @@ def train_models(data: pd.DataFrame):
     X = data[FEATURES]
     y = data["Recommended_Chemical"]
 
-    # Stratified split — balanced dataset guarantees ≥2 samples per class
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    # Classifier
     clf = RandomForestClassifier(
-        n_estimators=200,
-        max_depth=15,
-        min_samples_leaf=4,
-        min_samples_split=8,
-        max_features="sqrt",
-        random_state=42,
+        n_estimators=200, max_depth=15,
+        min_samples_leaf=4, min_samples_split=8,
+        max_features="sqrt", random_state=42,
         class_weight="balanced",
     )
     clf.fit(X_train, y_train)
-    y_pred   = clf.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    report   = classification_report(y_test, y_pred, output_dict=True)
+    accuracy = accuracy_score(y_test, clf.predict(X_test))
+    report   = classification_report(y_test, clf.predict(X_test), output_dict=True)
 
-    # Yield regressor
     reg = RandomForestRegressor(
-        n_estimators=200,
-        max_depth=15,
-        min_samples_leaf=4,
-        random_state=42,
+        n_estimators=200, max_depth=15,
+        min_samples_leaf=4, random_state=42,
     )
     reg.fit(X, data["Yield"])
 
-    # Feature importances
-    importances = pd.Series(clf.feature_importances_, index=FEATURES).sort_values(ascending=False)
+    importances = pd.Series(
+        clf.feature_importances_, index=FEATURES
+    ).sort_values(ascending=False)
 
     return clf, reg, round(accuracy * 100, 2), report, importances
 
@@ -1046,13 +1678,13 @@ def compute_derived(n, p, k, temp, humidity, rainfall):
 def before_after_df(n, p, k):
     r = 1 - CHEM_REDUCTION
     return pd.DataFrame({
-        "Nutrient":    ["Nitrogen (N)", "Phosphorus (P)", "Potassium (K)"],
-        "Before (kg/ha)": [round(n,2), round(p,2), round(k,2)],
-        "After (kg/ha)":  [round(n*r,2), round(p*r,2), round(k*r,2)],
-        "Saved (kg/ha)":  [round(n*CHEM_REDUCTION,2),
-                           round(p*CHEM_REDUCTION,2),
-                           round(k*CHEM_REDUCTION,2)],
-        "Reduction":   [f"{int(CHEM_REDUCTION*100)}%"] * 3,
+        "Nutrient":        ["Nitrogen (N)", "Phosphorus (P)", "Potassium (K)"],
+        "Before (kg/ha)":  [round(n, 2), round(p, 2), round(k, 2)],
+        "After (kg/ha)":   [round(n*r, 2), round(p*r, 2), round(k*r, 2)],
+        "Saved (kg/ha)":   [round(n*CHEM_REDUCTION, 2),
+                            round(p*CHEM_REDUCTION, 2),
+                            round(k*CHEM_REDUCTION, 2)],
+        "Reduction":       [f"{int(CHEM_REDUCTION*100)}%"] * 3,
     })
 
 # ─────────────────────────────────────────────────────────────
@@ -1061,7 +1693,6 @@ def before_after_df(n, p, k):
 
 data = load_data()
 
-# Final safety clean
 for col in FEATURES + ["Yield"]:
     if col in data.columns:
         data[col] = pd.to_numeric(data[col], errors="coerce")
@@ -1076,18 +1707,19 @@ except Exception as e:
     st.error(f"❌ Model training failed: {e}")
     st.stop()
 
+API_KEY = get_api_key()
+
 # ─────────────────────────────────────────────────────────────
 # SESSION STATE
 # ─────────────────────────────────────────────────────────────
 
 _defaults = dict(
     done=False,
-    city=None, temp=None, hum=None, rain=None,
+    city=None, weather=None,
     chemical=None, organic=None, crop_input=None,
     soil_score=None, soil_label=None, soil_color=None,
     yield_pred=None, yield_impr=None,
-    N=None, P=None, K=None,
-    pH=None, moisture=None,
+    N=None, P=None, K=None, pH=None, moisture=None,
     derived=None, proba=None,
 )
 for k, v in _defaults.items():
@@ -1095,50 +1727,71 @@ for k, v in _defaults.items():
         st.session_state[k] = v
 
 # ─────────────────────────────────────────────────────────────
-# HEADER METRICS  (always visible)
+# HEADER METRICS
 # ─────────────────────────────────────────────────────────────
 
 m1, m2, m3, m4, m5 = st.columns(5)
 m1.metric("🎯 Model Accuracy",     f"{accuracy}%")
 m2.metric("🌾 Fertilizer Classes", data["Recommended_Chemical"].nunique())
 m3.metric("📁 Training Samples",   f"{len(data):,}")
-m4.metric("🧬 Feature Count",      len(FEATURES))
+m4.metric("🧬 ML Features",        len(FEATURES))
 m5.metric("🌿 Crop Types",         data["Crop"].nunique())
 
 st.divider()
 
 # ─────────────────────────────────────────────────────────────
-# SIDEBAR
+# SIDEBAR — no weather inputs, only soil + city
 # ─────────────────────────────────────────────────────────────
 
 st.sidebar.markdown("## 🌾 Soil & Location Inputs")
 
-city       = st.sidebar.selectbox("📍 City", CITIES)
-crop_input = st.sidebar.selectbox("🌱 Crop", sorted(data["Crop"].unique()))
+city       = st.sidebar.selectbox("📍 Select City", CITIES)
+crop_input = st.sidebar.selectbox("🌱 Select Crop", sorted(data["Crop"].unique()))
 
-st.sidebar.markdown("**Soil Nutrients (kg/ha)**")
+st.sidebar.markdown("---")
+st.sidebar.markdown("**🧪 Soil Nutrients (kg/ha)**")
 N = st.sidebar.slider("Nitrogen (N)",   0, 300, 120)
-P = st.sidebar.slider("Phosphorus (P)", 0, 150, 50)
-K = st.sidebar.slider("Potassium (K)",  0, 150, 40)
+P = st.sidebar.slider("Phosphorus (P)", 0, 150,  50)
+K = st.sidebar.slider("Potassium (K)",  0, 150,  40)
 
-st.sidebar.markdown("**Soil Properties**")
-pH       = st.sidebar.slider("pH",           4.5, 8.5, 6.8, step=0.1)
-moisture = st.sidebar.slider("Soil Moisture (%)", 10, 80, 45)
+st.sidebar.markdown("**🌍 Soil Properties**")
+pH       = st.sidebar.slider("pH Level",         4.5, 8.5, 6.8, step=0.1)
+moisture = st.sidebar.slider("Soil Moisture (%)", 10,  80,  45)
 
-st.sidebar.markdown("**Weather (manual override)**")
-temp_in = st.sidebar.number_input("Temperature (°C)", 10, 45, 28)
-hum_in  = st.sidebar.number_input("Humidity (%)",     20, 100, 65)
-rain_in = st.sidebar.number_input("Rainfall (mm)",    0,  500, 50)
+st.sidebar.markdown("---")
 
-predict_btn = st.sidebar.button("🔍 Predict", use_container_width=True, type="primary")
+# Live weather preview in sidebar when city changes
+if API_KEY:
+    with st.sidebar:
+        with st.spinner(f"Fetching weather for {city}…"):
+            preview = get_weather(city, API_KEY)
+        if preview.get("error"):
+            st.warning(f"⚠️ Weather: {preview['error']}")
+        else:
+            st.markdown(
+                f'<div class="weather-card">'
+                f'<b>🌤 {city} — Live Weather</b><br>'
+                f'🌡 {preview["temperature"]}°C &nbsp;|&nbsp; '
+                f'💧 {preview["humidity"]}% &nbsp;|&nbsp; '
+                f'🌧 {preview["rainfall"]} mm<br>'
+                f'<small>{preview["description"]} · 💨 {preview["wind_speed"]} m/s</small>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+else:
+    st.sidebar.info(
+        "ℹ️ Add **OWM_API_KEY** to Streamlit Secrets to enable live weather."
+    )
 
-st.sidebar.divider()
+predict_btn = st.sidebar.button(
+    "🔍 Predict Fertilizer", use_container_width=True, type="primary"
+)
+
 st.sidebar.markdown(
     "**Soil Score Guide**\n"
     "- 🟢 Excellent ≥ 150\n"
     "- 🟡 Good ≥ 100\n"
-    "- 🔴 Poor < 100\n\n"
-    "**Yield baseline:** 2.5 t/ha"
+    "- 🔴 Poor < 100"
 )
 
 # ─────────────────────────────────────────────────────────────
@@ -1146,39 +1799,45 @@ st.sidebar.markdown(
 # ─────────────────────────────────────────────────────────────
 
 if predict_btn:
-    try:
-        # Fetch live weather (fallback to manual inputs)
-        live_temp, live_hum, live_rain = get_weather(city)
-        use_temp = live_temp if OWM_API_KEY else temp_in
-        use_hum  = live_hum  if OWM_API_KEY else hum_in
-        use_rain = live_rain if OWM_API_KEY else rain_in
+    with st.spinner(f"🌐 Fetching live weather for **{city}**…"):
+        weather = get_weather(city, API_KEY)
 
-        derived = compute_derived(N, P, K, use_temp, use_hum, use_rain)
+    if weather.get("error"):
+        st.error(f"❌ Could not fetch weather: {weather['error']}")
+        st.info("ℹ️ Check your `OWM_API_KEY` in Streamlit Secrets → Settings → Secrets.")
+        st.stop()
+
+    try:
+        temp     = weather["temperature"]
+        humidity = weather["humidity"]
+        rainfall = weather["rainfall"]
+
+        derived = compute_derived(N, P, K, temp, humidity, rainfall)
 
         input_df = pd.DataFrame([[
-            N, P, K, use_temp, use_hum, use_rain,
+            N, P, K, temp, humidity, rainfall,
             pH, moisture,
             derived["Soil_Quality_Index"],
             derived["NPK_Ratio"],
             derived["Weather_Index"],
         ]], columns=FEATURES)
 
-        chemical = clf.predict(input_df)[0]
-        proba_arr = clf.predict_proba(input_df)[0]
-        proba = dict(zip(clf.classes_, np.round(proba_arr * 100, 1)))
+        chemical     = clf.predict(input_df)[0]
+        proba_arr    = clf.predict_proba(input_df)[0]
+        proba        = dict(zip(clf.classes_, np.round(proba_arr * 100, 1)))
 
-        org_match = data[data["Recommended_Chemical"] == chemical]["Recommended_Organic"]
-        organic   = org_match.iloc[0] if not org_match.empty else "Compost"
+        org_match    = data[data["Recommended_Chemical"] == chemical]["Recommended_Organic"]
+        organic      = org_match.iloc[0] if not org_match.empty else "Compost"
 
-        soil_score        = round(0.4*N + 0.3*P + 0.3*K, 2)
-        label, color      = soil_status(soil_score)
-        yield_pred        = round(reg.predict(input_df)[0], 2)
-        yield_pred        = float(np.clip(yield_pred, 1.0, 8.0))
-        yield_impr        = round((yield_pred - BASELINE_YIELD) / BASELINE_YIELD * 100, 1)
+        soil_score   = round(0.4*N + 0.3*P + 0.3*K, 2)
+        label, color = soil_status(soil_score)
+        yield_pred   = float(np.clip(reg.predict(input_df)[0], 1.0, 8.0))
+        yield_pred   = round(yield_pred, 2)
+        yield_impr   = round((yield_pred - BASELINE_YIELD) / BASELINE_YIELD * 100, 1)
 
         st.session_state.update(dict(
             done=True,
-            city=city, temp=use_temp, hum=use_hum, rain=use_rain,
+            city=city, weather=weather,
             chemical=chemical, organic=organic, crop_input=crop_input,
             soil_score=soil_score, soil_label=label, soil_color=color,
             yield_pred=yield_pred, yield_impr=yield_impr,
@@ -1195,49 +1854,55 @@ if predict_btn:
 
 if st.session_state.done:
     ss = st.session_state
+    w  = ss.weather
 
-    # ── WEATHER ──────────────────────────────────────────────
-    st.markdown('<div class="section-title">🌤 Current Weather Conditions</div>',
+    # ── LIVE WEATHER PANEL ────────────────────────────────────
+    st.markdown('<div class="section-title">🌤 Live Weather Data</div>',
                 unsafe_allow_html=True)
-    w1, w2, w3 = st.columns(3)
-    w1.metric("🌡 Temperature", f"{ss.temp} °C")
-    w2.metric("💧 Humidity",    f"{ss.hum} %")
-    w3.metric("🌧 Rainfall",    f"{ss.rain} mm")
+
+    wc1, wc2, wc3, wc4, wc5 = st.columns(5)
+    wc1.metric("🌡 Temperature",   f"{w['temperature']} °C",
+               delta=f"Feels {w['feels_like']} °C")
+    wc2.metric("💧 Humidity",      f"{w['humidity']} %")
+    wc3.metric("🌧 Rainfall",      f"{w['rainfall']} mm")
+    wc4.metric("💨 Wind Speed",    f"{w['wind_speed']} m/s")
+    wc5.metric("🌥 Condition",     w["description"])
 
     st.divider()
 
-    # ── CORE PREDICTIONS ─────────────────────────────────────
+    # ── CORE PREDICTION METRICS ───────────────────────────────
     st.markdown('<div class="section-title">✅ AI Fertilizer Recommendation</div>',
                 unsafe_allow_html=True)
+
     r1, r2, r3, r4, r5, r6 = st.columns(6)
-    r1.metric("⚗️ Chemical",       ss.chemical)
-    r2.metric("🌿 Organic",        ss.organic)
-    r3.metric("🧮 Soil Score",     ss.soil_score)
-    r4.metric("🌾 Predicted Yield",f"{ss.yield_pred} t/ha")
-    r5.metric("📈 Yield vs Base",  f"{ss.yield_impr}%",
-              delta=f"baseline {BASELINE_YIELD} t/ha")
-    r6.metric("🌱 Crop",          ss.crop_input)
+    r1.metric("⚗️ Chemical Fertilizer",  ss.chemical)
+    r2.metric("🌿 Organic Fertilizer",   ss.organic)
+    r3.metric("🧮 Soil Health Score",    ss.soil_score)
+    r4.metric("🌾 Predicted Yield",      f"{ss.yield_pred} t/ha")
+    r5.metric("📈 Yield vs Baseline",    f"{ss.yield_impr}%",
+              delta=f"base {BASELINE_YIELD} t/ha")
+    r6.metric("🌱 Crop",                ss.crop_input)
 
     # Soil health banner
     st.markdown(
         f'<div class="status-banner" '
-        f'style="background:{ss.soil_color}18;border-left:6px solid {ss.soil_color};'
+        f'style="background:{ss.soil_color}18; border-left:6px solid {ss.soil_color}; '
         f'color:{ss.soil_color};">'
         f'🌱 Soil Health Status: {ss.soil_label}'
         f'</div>',
         unsafe_allow_html=True,
     )
 
-    # Derived features callout
-    d = ss.derived
+    # Derived features
     d1, d2, d3 = st.columns(3)
-    d1.metric("⚖️ NPK Ratio",          d["NPK_Ratio"])
-    d2.metric("🧪 Soil Quality Index",  d["Soil_Quality_Index"])
-    d3.metric("🌦 Weather Index",       d["Weather_Index"])
+    d = ss.derived
+    d1.metric("⚖️ NPK Ratio",           d["NPK_Ratio"])
+    d2.metric("🧪 Soil Quality Index",   d["Soil_Quality_Index"])
+    d3.metric("🌦 Weather Index",        d["Weather_Index"])
 
     st.divider()
 
-    # ── CONFIDENCE CHART ─────────────────────────────────────
+    # ── CONFIDENCE CHART ──────────────────────────────────────
     st.markdown('<div class="section-title">📊 Prediction Confidence</div>',
                 unsafe_allow_html=True)
 
@@ -1255,38 +1920,37 @@ if st.session_state.done:
         textposition="outside",
     ))
     fig_conf.update_layout(
-        title="Model Confidence per Fertilizer Class",
-        yaxis_title="Confidence (%)",
-        yaxis_range=[0, 110],
-        height=360,
-        plot_bgcolor="white",
-        showlegend=False,
+        title=f"Model Confidence — Recommended: <b>{ss.chemical}</b>",
+        yaxis_title="Confidence (%)", yaxis_range=[0, 115],
+        height=360, plot_bgcolor="white", showlegend=False,
     )
     st.plotly_chart(fig_conf, use_container_width=True)
 
     st.divider()
 
-    # ── BEFORE vs AFTER ──────────────────────────────────────
+    # ── BEFORE vs AFTER ───────────────────────────────────────
     st.markdown(
         f'<div class="section-title">🔄 Before vs After — {int(CHEM_REDUCTION*100)}% Chemical Reduction</div>',
         unsafe_allow_html=True,
     )
 
-    ba_df = before_after_df(ss.N, ss.P, ss.K)
-    st.dataframe(ba_df, use_container_width=True, hide_index=True)
+    st.dataframe(before_after_df(ss.N, ss.P, ss.K),
+                 use_container_width=True, hide_index=True)
 
-    ratio = 1 - CHEM_REDUCTION
+    ratio    = 1 - CHEM_REDUCTION
     ba_chart = pd.DataFrame({
         "Nutrient": ["N", "P", "K", "N", "P", "K"],
         "Value":    [ss.N, ss.P, ss.K,
-                     round(ss.N*ratio,2), round(ss.P*ratio,2), round(ss.K*ratio,2)],
+                     round(ss.N*ratio, 2),
+                     round(ss.P*ratio, 2),
+                     round(ss.K*ratio, 2)],
         "Phase":    ["Before"]*3 + ["After"]*3,
     })
     fig_ba = px.bar(
         ba_chart, x="Nutrient", y="Value", color="Phase", barmode="group",
         color_discrete_map={"Before": "#e53935", "After": "#43a047"},
         text="Value",
-        title="NPK Before vs After Chemical Fertilizer Replacement",
+        title="NPK Before vs After Fertilizer Replacement",
         labels={"Value": "Amount (kg/ha)"},
     )
     fig_ba.update_traces(textposition="outside")
@@ -1296,18 +1960,18 @@ if st.session_state.done:
     st.divider()
 
     # ── NPK PROFILE ───────────────────────────────────────────
-    st.markdown('<div class="section-title">📈 Soil Nutrient Profile</div>',
+    st.markdown('<div class="section-title">📈 Soil Nutrient Profile vs Optimal</div>',
                 unsafe_allow_html=True)
 
     fig_npk = px.bar(
         pd.DataFrame({
             "Nutrient": ["Nitrogen", "Phosphorus", "Potassium"],
-            "Value":    [ss.N, ss.P, ss.K],
-            "Optimal":  [150,  75,   75],
+            "Your Soil":  [ss.N, ss.P, ss.K],
+            "Optimal":    [150, 75, 75],
         }),
-        x="Nutrient", y=["Value", "Optimal"],
+        x="Nutrient", y=["Your Soil", "Optimal"],
         barmode="group",
-        color_discrete_map={"Value": "#2e7d32", "Optimal": "#a5d6a7"},
+        color_discrete_map={"Your Soil": "#2e7d32", "Optimal": "#a5d6a7"},
         text_auto=True,
         title="Your Soil Nutrients vs Optimal Levels (kg/ha)",
     )
@@ -1315,14 +1979,18 @@ if st.session_state.done:
     st.plotly_chart(fig_npk, use_container_width=True)
 
 else:
-    st.info("👈 Enter soil values in the sidebar and click **Predict** to generate your full advisory report.")
+    st.info("👈 Select your city and soil values in the sidebar, then click **Predict Fertilizer**.")
+    st.markdown(
+        "Live weather (temperature, humidity, rainfall) is fetched automatically "
+        "from OpenWeatherMap once you click Predict — no manual entry needed."
+    )
 
 # ─────────────────────────────────────────────────────────────
 # DATASET INSIGHTS  (always visible)
 # ─────────────────────────────────────────────────────────────
 
 st.divider()
-tab1, tab2, tab3 = st.tabs(["📊 Fertilizer Distribution", "🌾 Feature Importance", "📋 Dataset Sample"])
+tab1, tab2, tab3 = st.tabs(["📊 Distributions", "🧬 Feature Importance", "📋 Data Sample"])
 
 with tab1:
     col_a, col_b = st.columns(2)
@@ -1337,8 +2005,8 @@ with tab1:
             text=dist_df["Count"], textposition="outside",
         ))
         fig_dist.update_layout(
-            title="Fertilizer Class Distribution (Balanced)",
-            height=380, plot_bgcolor="white", showlegend=False,
+            title="Fertilizer Class Distribution (Balanced — 1250 each)",
+            height=360, plot_bgcolor="white", showlegend=False,
         )
         st.plotly_chart(fig_dist, use_container_width=True)
 
@@ -1351,18 +2019,15 @@ with tab1:
             color_discrete_sequence=px.colors.sequential.Greens_r,
             hole=0.35,
         )
-        fig_crop.update_layout(height=380)
+        fig_crop.update_layout(height=360)
         st.plotly_chart(fig_crop, use_container_width=True)
 
-    # Yield distribution
     fig_yield = px.histogram(
         data, x="Yield", color="Recommended_Chemical",
-        color_discrete_map=FERT_COLORS,
-        nbins=40,
+        color_discrete_map=FERT_COLORS, nbins=40,
         title="Yield Distribution by Fertilizer Type (t/ha)",
         labels={"Yield": "Yield (t/ha)", "count": "Frequency"},
-        barmode="overlay",
-        opacity=0.7,
+        barmode="overlay", opacity=0.7,
     )
     fig_yield.update_layout(height=380, plot_bgcolor="white")
     st.plotly_chart(fig_yield, use_container_width=True)
@@ -1371,10 +2036,8 @@ with tab2:
     imp_df = importances.reset_index()
     imp_df.columns = ["Feature", "Importance"]
     fig_imp = px.bar(
-        imp_df, x="Importance", y="Feature",
-        orientation="h",
-        color="Importance",
-        color_continuous_scale="Greens",
+        imp_df, x="Importance", y="Feature", orientation="h",
+        color="Importance", color_continuous_scale="Greens",
         text=imp_df["Importance"].round(3),
         title="RandomForest Feature Importances",
     )
@@ -1386,14 +2049,13 @@ with tab2:
     )
     st.plotly_chart(fig_imp, use_container_width=True)
 
-    # Scatter: N vs P coloured by fertilizer
     fig_scatter = px.scatter(
         data.sample(1000, random_state=1),
         x="Nitrogen", y="Phosphorus",
         color="Recommended_Chemical",
         color_discrete_map=FERT_COLORS,
         opacity=0.6,
-        title="Nitrogen vs Phosphorus (sample 1000 rows)",
+        title="Nitrogen vs Phosphorus — coloured by Fertilizer (1000 sample)",
         hover_data=["Crop", "Yield"],
     )
     fig_scatter.update_layout(height=420, plot_bgcolor="white")
@@ -1407,39 +2069,52 @@ with tab3:
     st.caption(f"Showing 20 random rows from {len(data):,} total training samples.")
 
 # ─────────────────────────────────────────────────────────────
-# FARM MAP  (always visible)
+# FARM MAP
 # ─────────────────────────────────────────────────────────────
 
 st.divider()
-st.markdown('<div class="section-title">🗺️ Farm Location Map</div>', unsafe_allow_html=True)
+st.markdown('<div class="section-title">🗺️ Farm Location Map</div>',
+            unsafe_allow_html=True)
 
-farm_map = folium.Map(location=[26.7606, 83.3732], zoom_start=6)
-folium.Marker(
+selected_coords = CITY_COORDS.get(
+    st.session_state.city if st.session_state.city else "Gorakhpur",
     [26.7606, 83.3732],
+)
+
+farm_map = folium.Map(location=selected_coords, zoom_start=6)
+
+# All city markers
+for city_name, coords in CITY_COORDS.items():
+    is_selected = (city_name == st.session_state.city)
+    folium.CircleMarker(
+        coords,
+        radius=8 if is_selected else 5,
+        color="#e65100" if is_selected else "#1b5e20",
+        fill=True,
+        fill_color="#ff7043" if is_selected else "#4caf50",
+        fill_opacity=0.9,
+        popup=folium.Popup(
+            f"<b>{city_name}</b>" + (" ← Selected" if is_selected else ""),
+            max_width=160,
+        ),
+    ).add_to(farm_map)
+
+# Main farm pin
+folium.Marker(
+    selected_coords,
     popup=folium.Popup(
-        "<b>📍 Farm Location</b><br>Lat: 26.7606 | Lon: 83.3732<br>Region: Gorakhpur, UP",
-        max_width=240,
+        f"<b>📍 {st.session_state.city or 'Farm Location'}</b><br>"
+        f"Lat: {selected_coords[0]} | Lon: {selected_coords[1]}",
+        max_width=220,
     ),
     icon=folium.Icon(color="green", icon="leaf", prefix="fa"),
 ).add_to(farm_map)
 
-# Add city markers
-city_coords = {
-    "Gorakhpur":  [26.7606, 83.3732],
-    "Lucknow":    [26.8467, 80.9462],
-    "Varanasi":   [25.3176, 82.9739],
-    "Delhi":      [28.6139, 77.2090],
-    "Patna":      [25.5941, 85.1376],
-    "Ludhiana":   [30.9010, 75.8573],
-    "Amritsar":   [31.6340, 74.8723],
-}
-for city_name, coords in city_coords.items():
-    folium.CircleMarker(
-        coords, radius=5, color="#1b5e20", fill=True,
-        fill_color="#4caf50", fill_opacity=0.7,
-        popup=city_name,
-    ).add_to(farm_map)
-
 st_folium(farm_map, width=700, height=500)
 
-st.caption("SoilSense · Powered by RandomForest AI · Dataset: improved_balanced_dataset_5000.xlsx · Built with Streamlit 🌱")
+st.caption(
+    "SoilSense · RandomForest AI · "
+    "Live Weather: OpenWeatherMap · "
+    "Dataset: improved_balanced_dataset_5000.xlsx · "
+    "Built with Streamlit 🌱"
+)
