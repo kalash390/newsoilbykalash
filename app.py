@@ -2125,6 +2125,188 @@ else:
         "while still maintaining sustainable yield levels."
     )
 
+
+# ─────────────────────────────────────────────────────────────
+# COST SAVINGS COMPARISON: CHEMICAL vs ORGANIC FERTILIZER
+# ─────────────────────────────────────────────────────────────
+
+st.divider()
+st.markdown(
+    '<div class="section-title">💰 Fertilizer Cost Savings Analysis</div>',
+    unsafe_allow_html=True,
+)
+
+st.caption(
+    "Compare the real-world cost of using chemical fertilizers vs switching to organic alternatives. "
+    "Adjust the chemical reduction percentage to see how much you can save."
+)
+
+# ── Pricing constants (₹ per kg) ─────────────────────────────
+UREA_PRICE     = 6    # Nitrogen
+DAP_PRICE      = 25   # Phosphorus
+POTASH_PRICE   = 20   # Potassium
+ORGANIC_PRICE  = 4    # Average organic fertilizer
+
+# ── Session state init ───────────────────────────────────────
+if "cost_reduction_pct" not in st.session_state:
+    st.session_state.cost_reduction_pct = 30
+if "cost_analysis_data" not in st.session_state:
+    st.session_state.cost_analysis_data = None
+
+# ── Pull NPK from session_state (fallback to sidebar) ────────
+def _safe_cost_val(v):
+    try:
+        v = float(v)
+        if pd.isna(v) or v < 0:
+            return 0.0
+        return v
+    except Exception:
+        return 0.0
+
+cost_N = _safe_cost_val(st.session_state.N if st.session_state.get("N") is not None else N)
+cost_P = _safe_cost_val(st.session_state.P if st.session_state.get("P") is not None else P)
+cost_K = _safe_cost_val(st.session_state.K if st.session_state.get("K") is not None else K)
+
+# ── Reduction slider ─────────────────────────────────────────
+reduction_pct = st.slider(
+    "🔧 Chemical Reduction %",
+    min_value=10, max_value=50,
+    value=st.session_state.cost_reduction_pct,
+    step=5,
+    key="cost_reduction_slider",
+    help="Percentage by which chemical fertilizer use is reduced when switching to organic.",
+)
+st.session_state.cost_reduction_pct = reduction_pct
+reduction_ratio = reduction_pct / 100.0
+
+# ── CALCULATIONS ─────────────────────────────────────────────
+try:
+    # Chemical cost
+    chemical_cost = (cost_N * UREA_PRICE) + (cost_P * DAP_PRICE) + (cost_K * POTASH_PRICE)
+
+    # Organic equivalents (reduction factor applied)
+    organic_N = cost_N * (1 - reduction_ratio)
+    organic_P = cost_P * (1 - reduction_ratio)
+    organic_K = cost_K * (1 - reduction_ratio)
+
+    organic_cost = (organic_N + organic_P + organic_K) * ORGANIC_PRICE
+
+    # Savings (clamp to non-negative)
+    savings = max(0.0, chemical_cost - organic_cost)
+    savings_pct = round((savings / chemical_cost * 100), 1) if chemical_cost > 0 else 0.0
+
+    # Sanitize all values
+    chemical_cost = round(max(0.0, chemical_cost), 2)
+    organic_cost  = round(max(0.0, organic_cost), 2)
+    savings       = round(savings, 2)
+
+    # Persist
+    st.session_state.cost_analysis_data = {
+        "chemical_cost": chemical_cost,
+        "organic_cost":  organic_cost,
+        "savings":       savings,
+        "savings_pct":   savings_pct,
+        "reduction_pct": reduction_pct,
+    }
+
+except Exception as e:
+    st.error(f"⚠️ Cost calculation error: {e}")
+    chemical_cost, organic_cost, savings, savings_pct = 0.0, 0.0, 0.0, 0.0
+
+# ── METRICS DISPLAY ──────────────────────────────────────────
+mc1, mc2, mc3 = st.columns(3)
+mc1.metric(
+    "🧪 Chemical Fertilizer Cost",
+    f"₹{chemical_cost:,.2f}",
+    help=f"Urea ₹{UREA_PRICE}/kg · DAP ₹{DAP_PRICE}/kg · Potash ₹{POTASH_PRICE}/kg",
+)
+mc2.metric(
+    "🌿 Organic Fertilizer Cost",
+    f"₹{organic_cost:,.2f}",
+    help=f"Organic blend ₹{ORGANIC_PRICE}/kg (after {reduction_pct}% reduction)",
+)
+mc3.metric(
+    "💵 Total Savings",
+    f"₹{savings:,.2f}",
+    delta=f"{savings_pct}% saved",
+    help="Chemical Cost − Organic Cost",
+)
+
+# ── COMPARISON TABLE ─────────────────────────────────────────
+st.markdown("#### 📋 Cost Breakdown Table")
+
+cost_table = pd.DataFrame({
+    "Type":     ["Chemical", "Organic", "Savings"],
+    "Cost (₹)": [f"₹{chemical_cost:,.2f}",
+                 f"₹{organic_cost:,.2f}",
+                 f"₹{savings:,.2f}"],
+    "Details":  [
+        f"Urea: ₹{cost_N * UREA_PRICE:,.0f} | DAP: ₹{cost_P * DAP_PRICE:,.0f} | Potash: ₹{cost_K * POTASH_PRICE:,.0f}",
+        f"{reduction_pct}% reduction → {round(organic_N + organic_P + organic_K, 2)} kg @ ₹{ORGANIC_PRICE}/kg",
+        f"You save {savings_pct}% per hectare",
+    ],
+})
+st.dataframe(cost_table, use_container_width=True, hide_index=True)
+
+# ── COST COMPARISON BAR CHART ────────────────────────────────
+st.markdown("#### 📊 Cost Comparison Chart")
+
+try:
+    cost_chart_df = pd.DataFrame({
+        "Fertilizer Type": ["Chemical", "Organic"],
+        "Cost (₹)":        [chemical_cost, organic_cost],
+    })
+
+    fig_cost = px.bar(
+        cost_chart_df,
+        x="Fertilizer Type",
+        y="Cost (₹)",
+        color="Fertilizer Type",
+        text="Cost (₹)",
+        color_discrete_map={"Chemical": "#e53935", "Organic": "#43a047"},
+        title="Cost Comparison: Chemical vs Organic Fertilizer",
+        labels={"Cost (₹)": "Cost (₹ per hectare)"},
+    )
+    fig_cost.update_traces(
+        texttemplate="₹%{text:,.0f}",
+        textposition="outside",
+    )
+    fig_cost.update_layout(
+        height=420,
+        plot_bgcolor="white",
+        showlegend=False,
+        yaxis=dict(rangemode="tozero"),
+    )
+    st.plotly_chart(fig_cost, use_container_width=True)
+
+except Exception as e:
+    st.error(f"⚠️ Could not render cost chart: {e}")
+
+# ── INSIGHT BANNER ───────────────────────────────────────────
+if savings > 0:
+    st.success(
+        f"✅ **Savings Insight:** By switching to organic fertilizer with a **{reduction_pct}% chemical reduction**, "
+        f"you save **₹{savings:,.2f} per hectare** ({savings_pct}% reduction in fertilizer expenses). "
+        f"For a 5-hectare farm, that's approximately **₹{savings * 5:,.2f}** saved per season! 🌾"
+    )
+else:
+    st.info(
+        "ℹ️ Enter your soil NPK values in the sidebar to see your personalized cost savings analysis."
+    )
+
+# ── PRICING REFERENCE ────────────────────────────────────────
+with st.expander("💡 View Pricing Assumptions"):
+    pricing_df = pd.DataFrame({
+        "Fertilizer":  ["Urea (Nitrogen)", "DAP (Phosphorus)", "Potash (Potassium)", "Organic Blend"],
+        "Price (₹/kg)": [UREA_PRICE, DAP_PRICE, POTASH_PRICE, ORGANIC_PRICE],
+        "Type":         ["Chemical", "Chemical", "Chemical", "Organic"],
+    })
+    st.dataframe(pricing_df, use_container_width=True, hide_index=True)
+    st.caption(
+        "Prices are approximate Indian market rates and may vary by region, subsidy, and season. "
+        "Update constants in code (`UREA_PRICE`, `DAP_PRICE`, `POTASH_PRICE`, `ORGANIC_PRICE`) for accurate local pricing."
+    )
+
 # ─────────────────────────────────────────────────────────────
 # DATASET INSIGHTS  (always visible)
 # ─────────────────────────────────────────────────────────────
