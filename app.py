@@ -507,10 +507,11 @@ def get_weather(city: str) -> tuple:
 @st.cache_data
 def load_and_clean_data() -> pd.DataFrame:
     files = [
-        "SoilSense_Output.xlsx",
-        "SoilSense_weather_dataset_5000_non_repeating.xlsx",
-        "rabi_training_data_punjab.csv.xlsx",
-        "rabi_punjabcrop.xlsx",
+        # "SoilSense_Output.xlsx",
+        # "SoilSense_weather_dataset_5000_non_repeating.xlsx",
+        # "rabi_training_data_punjab.csv.xlsx",
+        # "rabi_punjabcrop.xlsx",
+        "improved_balanced_dataset_5000.xlsv",
     ]
 
     dfs = []
