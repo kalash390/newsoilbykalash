@@ -4962,7 +4962,7 @@ Keep answers short, simple, and farmer-friendly. Always refer to the soil data a
     try:
         from openai import OpenAI
 
-        openai_key = st.secrets.get("OPENAI_API_KEY", "")
+        openai_key = st.secrets.get("OPENAI_API_KEY", "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")
         if not openai_key:
             raise ValueError("OPENAI_API_KEY not found in st.secrets")
 
@@ -5949,7 +5949,7 @@ def generate_pdf_report(report_data: dict) -> bytes:
 
     test_table = Table(test_rows, colWidths=[4.2*cm, 3.5*cm, 3.5*cm, 2*cm, 3.5*cm])
     style_cmds = [
-        ("BACKGROUND",  (0, 0), (-1, 0), colors.HexColor("#1b5e20")),
+        ("BACKGROUND",  (0, 0), (-1, 0), colors.HexColor("#1b5e50")),
         ("TEXTCOLOR",   (0, 0), (-1, 0), colors.white),
         ("FONTNAME",    (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE",    (0, 0), (-1, 0), 10),
@@ -5959,7 +5959,7 @@ def generate_pdf_report(report_data: dict) -> bytes:
         ("VALIGN",      (0, 0), (-1, -1), "MIDDLE"),
         ("FONTNAME",    (0, 1), (0, -1),  "Helvetica-Bold"),
         ("FONTNAME",    (4, 1), (4, -1),  "Helvetica-Bold"),
-        ("BOX",         (0, 0), (-1, -1), 1.2, colors.HexColor("#1b5e20")),
+        ("BOX",         (0, 0), (-1, -1), 1.2, colors.HexColor("#1b5e50")),
         ("INNERGRID",   (0, 0), (-1, -1), 0.4, colors.grey),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1),
             [colors.white, colors.HexColor("#f1f8e9")]),
