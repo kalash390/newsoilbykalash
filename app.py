@@ -2236,33 +2236,5 @@ elif menu == "Weather Dashboard":
         if weather['humidity'] > 90:
             st.warning("⚠️ Excess Moisture Warning")
 
-```
 
----
-
-# Install Requirements
-
-```bash
-pip install streamlit pandas numpy scikit-learn openpyxl requests joblib
-```
-
----
-
-# Run Application
-
-```bash
-streamlit run app.py
-```
-
----
-
-# IMPORTANT
-
-Replace:
-
-```python
-API_KEY = "YOUR_OPENWEATHER_API_KEY"
-```
-
-with your real OpenWeather API key.
 
