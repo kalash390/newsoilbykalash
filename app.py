@@ -1747,1121 +1747,520 @@
 
 
 
-import os, random, time
-from datetime import datetime
-from io import BytesIO
+# SOIL SENSE — Dataset Ready Single File Streamlit App
 
-import requests
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+import requests
+import joblib
+import os
+
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score
-import joblib
 
-# ─────────────────────────────────────────────────────────
+# =====================================================
 # PAGE CONFIG
-# ─────────────────────────────────────────────────────────
+# =====================================================
+
 st.set_page_config(
-    page_title="SoilSense Punjab — Smart Agri System",
-    page_icon="🌾",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    page_title="SOIL SENSE",
+    layout="wide"
 )
 
-st.markdown("""
-<style>
-.main-header{background:linear-gradient(135deg,#1b5e20,#2e7d32,#388e3c);
-  padding:22px 30px;border-radius:14px;margin-bottom:20px;}
-.main-header h1{color:white;margin:0;font-size:2rem;font-weight:700;}
-.main-header p{color:#c8e6c9;margin:5px 0 0;font-size:1rem;}
-.kpi-card{background:white;border-radius:12px;padding:16px;
-  border-left:5px solid #2e7d32;box-shadow:0 2px 8px rgba(0,0,0,0.08);text-align:center;}
-.kpi-val{font-size:1.7rem;font-weight:700;color:#1b5e20;}
-.kpi-lbl{font-size:0.82rem;color:#555;margin-top:2px;}
-.alert-safe{background:#e8f5e9;border-left:5px solid #2e7d32;
-  padding:12px 18px;border-radius:8px;color:#1b5e20;font-weight:600;}
-.alert-caution{background:#fff8e1;border-left:5px solid #f9a825;
-  padding:12px 18px;border-radius:8px;color:#856404;font-weight:600;}
-.alert-stop{background:#ffebee;border-left:5px solid #c62828;
-  padding:12px 18px;border-radius:8px;color:#c62828;font-weight:600;}
-.phase-badge{display:inline-block;padding:4px 12px;border-radius:20px;
-  font-size:0.82rem;font-weight:600;}
-.section-title{font-size:1.1rem;font-weight:700;color:#1b5e20;
-  border-bottom:2px solid #a5d6a7;padding-bottom:6px;margin:18px 0 12px;}
-</style>
-""", unsafe_allow_html=True)
+# =====================================================
+# TITLE
+# =====================================================
 
-st.markdown("""
-<div class="main-header">
-  <h1>🌾 SoilSense Punjab — Smart Agri Advisory System</h1>
-  <p>ML-powered soil analysis · 42-day organic transition tracking · NPK optimization · Punjab crop intelligence</p>
-</div>
-""", unsafe_allow_html=True)
+st.title("🌱 SOIL SENSE")
+st.subheader("AI-Based Soil Recovery & Fertilizer Transition System")
 
-# ─────────────────────────────────────────────────────────
-# CONSTANTS
-# ─────────────────────────────────────────────────────────
-MAIN_DATASET   = "SoilSense_Punjab_800_PDFCalibrated.xlsx"
-TRANS_DATASET  = "Punjab_SmartAgri_1008rows_42Days.xlsx"
-
-CROPS  = ["Wheat", "Rice", "Cotton", "Mustard", "Gram"]
-CITIES = ["Mohali", "Amritsar", "Jalandhar", "Ropar", "Ludhiana"]
-
-CROP_RANGES = {
-    "Wheat":   {"N":(80,130),  "P":(30,60),  "K":(20,50),  "pH":(6.0,7.5), "moisture":(35,55), "yield_base":3.5},
-    "Rice":    {"N":(100,140), "P":(40,70),  "K":(30,60),  "pH":(5.5,7.0), "moisture":(50,75), "yield_base":4.0},
-    "Cotton":  {"N":(90,140),  "P":(30,60),  "K":(40,70),  "pH":(6.5,8.0), "moisture":(30,55), "yield_base":2.5},
-    "Mustard": {"N":(60,100),  "P":(20,50),  "K":(15,40),  "pH":(6.0,7.5), "moisture":(25,50), "yield_base":1.8},
-    "Gram":    {"N":(20,60),   "P":(40,70),  "K":(20,45),  "pH":(6.0,8.0), "moisture":(25,45), "yield_base":1.4},
-}
-
-WEATHER_RISK_COLORS = {
-    "Extreme": "#c62828", "High": "#e65100",
-    "Medium":  "#f9a825", "Low":  "#2e7d32",
-}
-PHASE_COLORS = {
-    "Start": "#6a1b9a", "Early Shift": "#1565c0",
-    "Mid Shift": "#00695c", "Balanced Shift": "#2e7d32",
-    "Organic Dominant": "#1b5e20",
-}
-
-UREA_PRICE   = 6
-DAP_PRICE    = 25
-MOP_PRICE    = 20
-ORG_PRICE    = 4
-
-# ─────────────────────────────────────────────────────────
+# =====================================================
 # WEATHER API
-# ─────────────────────────────────────────────────────────
-def get_api_key():
-    try:    return st.secrets["OWM_API_KEY"]
-    except: return os.getenv("OWM_API_KEY","cb81120197f345ae396cd0fa28c1827c")
+# =====================================================
 
-@st.cache_data(ttl=1800)
-def get_weather(city, api_key):
+API_KEY = "YOUR_OPENWEATHER_API_KEY"
+
+
+def get_weather(city):
+
     try:
-        r = requests.get(
-            f"https://api.openweathermap.org/data/2.5/weather?q={city},IN&appid={api_key}&units=metric",
-            timeout=6)
-        r.raise_for_status(); d = r.json()
-        return {"temperature": round(d["main"]["temp"],1),
-                "humidity":    round(d["main"]["humidity"],1),
-                "rainfall":    round(d.get("rain",{}).get("1h",0.0),2),
-                "description": d["weather"][0]["description"].title(),
-                "wind_speed":  round(d["wind"]["speed"],1), "error": None}
-    except Exception as e:
-        return {"temperature":26.0,"humidity":62.0,"rainfall":0.0,
-                "description":"Clear Sky","wind_speed":2.5,"error":str(e)}
 
-# ─────────────────────────────────────────────────────────
-# DATA LOADING
-# ─────────────────────────────────────────────────────────
-@st.cache_data
-def load_main_data():
-    for path in [MAIN_DATASET, f"data/{MAIN_DATASET}"]:
-        if os.path.exists(path):
-            df = pd.read_excel(path); df.columns = df.columns.str.strip(); return df
-    st.error(f"❌ Dataset **{MAIN_DATASET}** not found. Place it in the app folder.")
-    st.stop()
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric"
 
-@st.cache_data
-def load_transition_data():
-    for path in [TRANS_DATASET, f"data/{TRANS_DATASET}"]:
-        if os.path.exists(path):
-            df = pd.read_excel(path); df.columns = df.columns.str.strip(); return df
-    return None
+        response = requests.get(url)
 
-# ─────────────────────────────────────────────────────────
-# MODEL TRAINING — PHASE 1 (MAIN PRIORITY)
-# ─────────────────────────────────────────────────────────
-TRAIN_FEATURES = [
-    "Soil_pH","Soil_Organic_Carbon_Percent",
-    "Soil_Nitrogen_kg_per_ha","Soil_Phosphorus_kg_per_ha","Soil_Potassium_kg_per_ha",
-    "Temperature_C","Humidity_Percent","Rainfall_mm","Soil_Moisture_Percent",
-    "NPK_Ratio","Soil_Quality_Index","Weather_Index",
-    "Urea_kg_acre","DAP_kg_acre","MOP_kg_acre",
-]
+        data = response.json()
 
-TRANS_FEATURES = [
-    "Current_Soil_pH","Current_Soil_Organic_Matter_Percent",
-    "Current_Soil_Nitrogen_kg_per_ha","Current_Soil_Phosphorus_kg_per_ha",
-    "Current_Soil_Potassium_kg_per_ha","Current_Temp","Current_Rain",
-    "Current_Hum","Day_Number","Week_Number","Soil_Recovery_Score",
-]
-
-@st.cache_resource
-def train_all_models(main_df, trans_df):
-    results = {}
-
-    # ── Model 1: Chemical Fertilizer Classifier ────────────
-    feat_cols = [c for c in TRAIN_FEATURES if c in main_df.columns]
-    X = main_df[feat_cols].fillna(main_df[feat_cols].median())
-    y = main_df["Recommended_Chemical"].astype(str).str.strip()
-
-    X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-    clf = RandomForestClassifier(n_estimators=300, max_depth=15, min_samples_leaf=3,
-                                 max_features="sqrt", random_state=42, class_weight="balanced")
-    clf.fit(X_tr, y_tr)
-    acc = round(accuracy_score(y_te, clf.predict(X_te)) * 100, 2)
-    results["clf"] = clf
-    results["clf_acc"] = acc
-    results["clf_features"] = feat_cols
-
-    # ── Model 2: Organic Fertilizer Classifier ─────────────
-    y_org = main_df["Recommended_Organic"].astype(str).str.strip()
-    y_tr2, y_te2 = train_test_split(y_org, test_size=0.2, random_state=42)[0], \
-                   train_test_split(y_org, test_size=0.2, random_state=42)[1]
-    clf_org = RandomForestClassifier(n_estimators=200, max_depth=12, random_state=42)
-    clf_org.fit(X_tr, y_tr2)
-    results["clf_org"] = clf_org
-
-    # ── Model 3: Yield Regressor ───────────────────────────
-    reg_yield = RandomForestRegressor(n_estimators=200, max_depth=15, random_state=42)
-    reg_yield.fit(X, main_df["Yield_ton_per_ha"])
-    results["reg_yield"] = reg_yield
-
-    # ── Model 4: Soil Recovery Regressor (42-day) ──────────
-    if trans_df is not None:
-        tcols = [c for c in TRANS_FEATURES if c in trans_df.columns]
-        Xt = trans_df[tcols].fillna(trans_df[tcols].median())
-        yt = trans_df["Transition_Success_Score"]
-        reg_trans = RandomForestRegressor(n_estimators=200, max_depth=12, random_state=42)
-        reg_trans.fit(Xt, yt)
-        results["reg_trans"] = reg_trans
-        results["trans_features"] = tcols
-
-        # Alert Status Classifier
-        le_alert = LabelEncoder()
-        ya = le_alert.fit_transform(trans_df["Alert_Status"].astype(str))
-        clf_alert = RandomForestClassifier(n_estimators=200, max_depth=10, random_state=42)
-        clf_alert.fit(Xt, ya)
-        results["clf_alert"] = clf_alert
-        results["le_alert"]  = le_alert
-
-    # ── Feature importances ────────────────────────────────
-    results["importances"] = pd.Series(clf.feature_importances_, index=feat_cols)\
-                               .sort_values(ascending=False)
-
-    return results
-
-# ─────────────────────────────────────────────────────────
-# HELPERS
-# ─────────────────────────────────────────────────────────
-def weather_risk(temp, rain, hum, event=None):
-    if event and event not in ["None","nan",None]: return "Extreme"
-    if temp > 38 or rain > 80: return "High"
-    if temp > 32 or rain > 40: return "Medium"
-    return "Low"
-
-def alert_from_risk(risk):
-    return {"Extreme":"STOP TRANSITION","High":"DELAY TRANSITION",
-            "Medium":"PROCEED WITH CAUTION","Low":"SAFE"}[risk]
-
-def soil_health_label(score):
-    if score >= 70: return "Excellent 🟢", "#2e7d32"
-    if score >= 50: return "Good 🟡",      "#f9a825"
-    if score >= 30: return "Fair 🟠",      "#e65100"
-    return              "Poor 🔴",         "#c62828"
-
-def compute_derived(N, P, K, temp, hum, rain, moisture, pH, OC):
-    npk_ratio    = round(N/P if P>0 else 0, 4)
-    soil_quality = round(N*0.001 + OC*10 + (pH-5)*2 + moisture*0.05, 2)
-    weather_idx  = round(hum*0.4 + rain*0.3 + temp*0.3, 2)
-    # Estimate Urea/DAP/MOP from N,P,K
-    urea = round(N * 0.6, 1)
-    dap  = round(P * 0.4, 1)
-    mop  = round(K * 0.3, 1)
-    return npk_ratio, soil_quality, weather_idx, urea, dap, mop
-
-def validate_inputs(crop, N, P, K, pH, moisture):
-    r = CROP_RANGES[crop]
-    warnings = []
-    if not (r["N"][0] <= N <= r["N"][1]):
-        warnings.append(f"⚠️ N ({N}) outside safe range {r['N']} for {crop}")
-    if not (r["P"][0] <= P <= r["P"][1]):
-        warnings.append(f"⚠️ P ({P}) outside safe range {r['P']} for {crop}")
-    if not (r["K"][0] <= K <= r["K"][1]):
-        warnings.append(f"⚠️ K ({K}) outside safe range {r['K']} for {crop}")
-    if not (r["pH"][0] <= pH <= r["pH"][1]):
-        warnings.append(f"⚠️ pH ({pH}) outside optimal range {r['pH']} for {crop}")
-    if not (r["moisture"][0] <= moisture <= r["moisture"][1]):
-        warnings.append(f"⚠️ Soil moisture ({moisture}%) outside range {r['moisture']} for {crop}")
-    return warnings
-
-def transition_phase_label(day):
-    if day<=6:    return "Start"
-    if day<=14:   return "Early Shift"
-    if day<=21:   return "Mid Shift"
-    if day<=35:   return "Balanced Shift"
-    return              "Organic Dominant"
-
-
-def assign_fertilizer_rule(crop, N, P, K, pH):
-    """Soil-test-based fertilizer assignment matching training dataset logic."""
-    if crop == 'Wheat':
-        if N < 200: return 'Urea'
-        elif P < 12: return 'DAP'
-        else: return 'MOP'
-    elif crop == 'Rice':
-        if N < 220: return 'Urea'
-        elif P < 12: return 'DAP'
-        else: return 'NPK'
-    elif crop == 'Cotton':
-        if N < 250: return 'NPK'
-        elif P < 12: return 'DAP'
-        else: return 'Urea'
-    elif crop == 'Mustard':
-        if pH > 7.5: return 'Sulphur'
-        elif N < 180: return 'Urea'
-        else: return 'DAP'
-    elif crop == 'Gram':
-        if P < 12: return 'DAP'
-        elif K < 200: return 'SSP'
-        else: return 'NPK'
-    return 'Urea'
-
-# ─────────────────────────────────────────────────────────
-# LOAD DATA + TRAIN
-# ─────────────────────────────────────────────────────────
-main_df  = load_main_data()
-trans_df = load_transition_data()
-
-# Clean main dataset
-for col in TRAIN_FEATURES + ["Yield_ton_per_ha"]:
-    if col in main_df.columns:
-        main_df[col] = pd.to_numeric(main_df[col], errors="coerce")
-        main_df[col] = main_df[col].fillna(main_df[col].median())
-main_df = main_df.dropna(subset=["Recommended_Chemical"]).reset_index(drop=True)
-
-with st.spinner("🧠 Training ML models on Punjab datasets…"):
-    models = train_all_models(main_df, trans_df)
-
-API_KEY = get_api_key()
-
-# ─────────────────────────────────────────────────────────
-# SESSION STATE
-# ─────────────────────────────────────────────────────────
-defaults = dict(
-    pred_done=False, city="Ludhiana", crop="Wheat",
-    N=120, P=20, K=250, pH=7.2, OC=0.50, moisture=45,
-    temp=26, hum=62, rain=5,
-    chemical=None, organic=None, yield_pred=None,
-    soil_score=None, alert=None, risk=None,
-    transition_day=1, show_42day=False,
-    upload_pred_df=None,
-)
-for k,v in defaults.items():
-    if k not in st.session_state: st.session_state[k]=v
-
-# ─────────────────────────────────────────────────────────
-# TOP KPI METRICS
-# ─────────────────────────────────────────────────────────
-k1,k2,k3,k4,k5 = st.columns(5)
-def kpi(col, val, lbl):
-    col.markdown(f'<div class="kpi-card"><div class="kpi-val">{val}</div>'
-                 f'<div class="kpi-lbl">{lbl}</div></div>', unsafe_allow_html=True)
-
-kpi(k1, f"{models['clf_acc']}%",   "🎯 Model Accuracy")
-kpi(k2, f"{len(main_df):,}",       "📁 Training Records")
-kpi(k3, "5 Models",               "🧬 ML Models Trained")
-kpi(k4, "42 Days",                "📅 Transition Tracked")
-kpi(k5, "5 Cities · 5 Crops",     "📍 Punjab Coverage")
-
-st.divider()
-
-# ═════════════════════════════════════════════════════════
-# MAIN TABS
-# ═════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "🔬 Manual Prediction",
-    "📂 Dataset Prediction",
-    "📅 42-Day Transition",
-    "📊 Model & Dataset Insights",
-    "🌤 Weather & Alerts",
-])
-
-# ════════════════════════════════════════════════════════════
-# TAB 1 — MANUAL PREDICTION
-# ════════════════════════════════════════════════════════════
-with tab1:
-    st.markdown('<div class="section-title">🔬 Manual Input Prediction</div>', unsafe_allow_html=True)
-    st.caption("Enter soil, crop, and weather values manually. The trained model will predict fertilizer, yield, and transition status.")
-
-    col_inp, col_res = st.columns([1, 1.4], gap="large")
-
-    with col_inp:
-        st.markdown("**🌱 Crop & Location**")
-        crop   = st.selectbox("Crop", CROPS, key="m_crop")
-        city   = st.selectbox("City", CITIES, key="m_city")
-
-        cr = CROP_RANGES[crop]
-        st.markdown("**🧪 Soil Nutrients (kg/ha)**")
-        st.caption(f"Recommended for {crop} — N: {cr['N']}, P: {cr['P']}, K: {cr['K']}")
-        N  = st.slider("Nitrogen (N)",         0, 650, 250, key="m_N")
-        P  = st.slider("Phosphorus (P)",        3,  130,  15, key="m_P")
-        K  = st.slider("Potassium (K)",       100, 450,  260, key="m_K")
-
-        st.markdown("**🌍 Soil Properties**")
-        pH       = st.slider("Soil pH",          5.5, 9.0, 7.2, step=0.05, key="m_pH")
-        OC       = st.slider("Organic Carbon %", 0.1, 2.0, 0.5, step=0.05, key="m_OC")
-        moisture = st.slider("Soil Moisture %",   15,  80,  45, key="m_moisture")
-
-        st.markdown("**🌤 Weather (auto-filled from live API)**")
-        w_data = get_weather(city, API_KEY)
-        # Clamp all API values to widget bounds before passing as defaults
-        _temp_val = float(max(10.0, min(50.0, w_data.get("temperature", 26) or 26)))
-        _hum_val  = float(max(20.0, min(98.0, w_data.get("humidity",    62) or 62)))
-        _rain_val = float(max(0.0,  min(150.0,w_data.get("rainfall",     0) or  0)))
-        temp   = st.number_input("Temperature (°C)", 10.0, 50.0,  _temp_val, step=0.5, key="m_temp")
-        hum    = st.number_input("Humidity (%)",      20.0, 98.0,  _hum_val,  step=0.5, key="m_hum")
-        rain   = st.number_input("Rainfall (mm)",      0.0, 150.0, _rain_val, step=0.5, key="m_rain")
-
-        if w_data.get("error"):
-            st.warning(f"⚠️ Weather API: {w_data['error']} — using defaults")
-        else:
-            st.success(f"✅ Live weather loaded for {city}")
-
-        predict_btn = st.button("🔍 Predict Now", type="primary",
-                                use_container_width=True, key="manual_predict")
-
-    with col_res:
-        if predict_btn:
-            # Validate
-            warnings = validate_inputs(crop, N, P, K, pH, moisture)
-            for w in warnings: st.warning(w)
-
-            # Compute derived
-            npk_ratio, soil_quality, weather_idx, urea, dap, mop = \
-                compute_derived(N, P, K, temp, hum, rain, moisture, pH, OC)
-
-            # Build input row matching training features
-            input_row = {
-                "Soil_pH": pH, "Soil_Organic_Carbon_Percent": OC,
-                "Soil_Nitrogen_kg_per_ha": N, "Soil_Phosphorus_kg_per_ha": P,
-                "Soil_Potassium_kg_per_ha": K,
-                "Temperature_C": temp, "Humidity_Percent": hum,
-                "Rainfall_mm": rain, "Soil_Moisture_Percent": moisture,
-                "NPK_Ratio": npk_ratio, "Soil_Quality_Index": soil_quality,
-                "Weather_Index": weather_idx,
-                "Urea_kg_acre": urea, "DAP_kg_acre": dap, "MOP_kg_acre": mop,
-            }
-            feat_cols = models["clf_features"]
-            X_pred = pd.DataFrame([input_row])[feat_cols]
-
-            # Predictions
-            chemical   = models["clf"].predict(X_pred)[0]
-            organic    = models["clf_org"].predict(X_pred)[0]
-            proba      = dict(zip(models["clf"].classes_,
-                                  np.round(models["clf"].predict_proba(X_pred)[0]*100, 1)))
-            yield_pred = round(float(np.clip(models["reg_yield"].predict(X_pred)[0], 0.5, 7.0)), 2)
-            risk       = weather_risk(temp, rain, hum)
-            alert      = alert_from_risk(risk)
-            soil_score = round(soil_quality + (N/650)*30, 1)
-            health_lbl, health_color = soil_health_label(soil_score)
-
-            # Organic transition after 42 days
-            org_N = round(N * 0.70, 1)
-            org_P = round(P * 0.70, 1)
-            org_K = round(K * 0.70, 1)
-
-            # Cost
-            chem_cost = round(N*UREA_PRICE + P*DAP_PRICE + K*MOP_PRICE/10, 0)
-            org_cost  = round((org_N + org_P + org_K) * ORG_PRICE, 0)
-            savings   = max(0, chem_cost - org_cost)
-
-            # Save to session
-            st.session_state.update(dict(
-                pred_done=True, city=city, crop=crop, N=N, P=P, K=K,
-                pH=pH, OC=OC, moisture=moisture, temp=temp, hum=hum, rain=rain,
-                chemical=chemical, organic=organic, yield_pred=yield_pred,
-                soil_score=soil_score, alert=alert, risk=risk,
-                proba=proba, health_lbl=health_lbl, health_color=health_color,
-                npk_ratio=npk_ratio, soil_quality=soil_quality, weather_idx=weather_idx,
-                org_N=org_N, org_P=org_P, org_K=org_K,
-                chem_cost=chem_cost, org_cost=org_cost, savings=savings,
-            ))
-
-        if st.session_state.pred_done:
-            ss = st.session_state
-
-            # Alert banner
-            alert_cls = {"SAFE":"alert-safe","PROCEED WITH CAUTION":"alert-caution",
-                         "DELAY TRANSITION":"alert-caution","STOP TRANSITION":"alert-stop"}
-            ac = alert_cls.get(ss.alert,"alert-caution")
-            icons = {"SAFE":"✅","PROCEED WITH CAUTION":"⚠️",
-                     "DELAY TRANSITION":"🔶","STOP TRANSITION":"🛑"}
-            st.markdown(
-                f'<div class="{ac}">{icons.get(ss.alert,"⚠️")} '
-                f'Transition Alert: <b>{ss.alert}</b> &nbsp;|&nbsp; '
-                f'Weather Risk: <b>{ss.risk}</b></div>',
-                unsafe_allow_html=True)
-
-            st.markdown("**✅ Fertilizer Recommendation**")
-            c1,c2,c3,c4 = st.columns(4)
-            c1.metric("⚗️ Chemical",   ss.chemical)
-            c2.metric("🌿 Organic",    ss.organic)
-            c3.metric("🌾 Yield Est.", f"{ss.yield_pred} t/ha")
-            c4.metric("🌱 Soil Health",ss.health_lbl)
-
-            c5,c6,c7 = st.columns(3)
-            c5.metric("🧪 NPK Ratio",      ss.npk_ratio)
-            c6.metric("🏭 Soil Quality",   ss.soil_quality)
-            c7.metric("🌦 Weather Index",  ss.weather_idx)
-
-            # Confidence chart
-            st.markdown("**📊 Model Confidence**")
-            proba_df = pd.DataFrame(ss.proba.items(), columns=["Fertilizer","Confidence"])
-            proba_df = proba_df.sort_values("Confidence", ascending=False)
-            fig_conf = px.bar(proba_df, x="Fertilizer", y="Confidence",
-                              text="Confidence", color="Confidence",
-                              color_continuous_scale="Greens",
-                              title="Prediction Confidence (%)")
-            fig_conf.update_traces(texttemplate="%{text:.1f}%", textposition="outside")
-            fig_conf.update_layout(height=300, plot_bgcolor="white",
-                                   coloraxis_showscale=False, showlegend=False)
-            st.plotly_chart(fig_conf, use_container_width=True)
-
-            # Day 1 vs Day 42 comparison
-            st.markdown("**🔄 Day 1 vs Day 42 — Organic Transition Impact**")
-            ba_df = pd.DataFrame({
-                "Nutrient": ["Nitrogen","Phosphorus","Potassium",
-                             "Nitrogen","Phosphorus","Potassium"],
-                "Value":    [ss.N, ss.P, ss.K, ss.org_N, ss.org_P, ss.org_K],
-                "Phase":    ["Day 1 (Chemical)"]*3 + ["Day 42 (Organic)"]*3,
-            })
-            fig_ba = px.bar(ba_df, x="Nutrient", y="Value", color="Phase",
-                            barmode="group", text="Value",
-                            color_discrete_map={"Day 1 (Chemical)":"#e53935",
-                                                "Day 42 (Organic)":"#43a047"},
-                            title="NPK: Before vs After 42-Day Organic Transition")
-            fig_ba.update_traces(textposition="outside")
-            fig_ba.update_layout(height=340, plot_bgcolor="white")
-            st.plotly_chart(fig_ba, use_container_width=True)
-
-            # Cost savings
-            st.markdown("**💰 Cost Analysis**")
-            cs1,cs2,cs3 = st.columns(3)
-            cs1.metric("🧪 Chemical Cost", f"₹{ss.chem_cost:,.0f}/ha")
-            cs2.metric("🌿 Organic Cost",  f"₹{ss.org_cost:,.0f}/ha")
-            cs3.metric("💵 Savings",       f"₹{ss.savings:,.0f}/ha")
-            if ss.savings > 0:
-                st.success(f"✅ Switch to organic saves ₹{ss.savings:,.0f}/ha — "
-                           f"₹{ss.savings*5:,.0f} on a 5-hectare farm per season!")
-
-            # NPK vs optimal
-            opt = CROP_RANGES[ss.crop]
-            opt_mid_N = sum(opt["N"])/2
-            opt_mid_P = sum(opt["P"])/2
-            opt_mid_K = sum(opt["K"])/2
-            npk_df = pd.DataFrame({
-                "Nutrient": ["Nitrogen","Phosphorus","Potassium",
-                             "Nitrogen","Phosphorus","Potassium"],
-                "Value":    [ss.N, ss.P, ss.K, opt_mid_N, opt_mid_P, opt_mid_K],
-                "Type":     ["Your Soil"]*3 + [f"Optimal for {ss.crop}"]*3,
-            })
-            fig_npk = px.bar(npk_df, x="Nutrient", y="Value", color="Type",
-                             barmode="group", text="Value",
-                             color_discrete_map={"Your Soil":"#1565c0",
-                                                 f"Optimal for {ss.crop}":"#a5d6a7"},
-                             title=f"Your NPK vs Optimal Range for {ss.crop}")
-            fig_npk.update_traces(textposition="outside")
-            fig_npk.update_layout(height=320, plot_bgcolor="white")
-            st.plotly_chart(fig_npk, use_container_width=True)
-
-        else:
-            st.info("👈 Fill in the inputs and click **Predict Now** to see results here.")
-
-# ════════════════════════════════════════════════════════════
-# TAB 2 — DATASET-BASED PREDICTION
-# ════════════════════════════════════════════════════════════
-with tab2:
-    st.markdown('<div class="section-title">📂 Dataset-Based Bulk Prediction</div>', unsafe_allow_html=True)
-    st.caption("Upload a CSV/Excel with soil data. The model will predict fertilizer recommendation and yield for every row.")
-
-    st.markdown("**Required columns (minimum):**")
-    st.code("Soil_pH, Soil_Organic_Carbon_Percent, Soil_Nitrogen_kg_per_ha, "
-            "Soil_Phosphorus_kg_per_ha, Soil_Potassium_kg_per_ha, "
-            "Temperature_C, Humidity_Percent, Rainfall_mm, Soil_Moisture_Percent", language="text")
-
-    uploaded = st.file_uploader("📁 Upload CSV or Excel file", type=["csv","xlsx","xls"])
-
-    if uploaded:
-        try:
-            if uploaded.name.endswith(".csv"):
-                up_df = pd.read_csv(uploaded)
-            else:
-                up_df = pd.read_excel(uploaded)
-            up_df.columns = up_df.columns.str.strip()
-            st.success(f"✅ Loaded {len(up_df):,} rows × {len(up_df.columns)} columns")
-
-            feat_cols = models["clf_features"]
-            missing_cols = [c for c in feat_cols if c not in up_df.columns]
-
-            if missing_cols:
-                st.warning(f"⚠️ Missing columns — will be filled with dataset medians: {missing_cols}")
-                for mc in missing_cols:
-                    if mc in main_df.columns:
-                        up_df[mc] = main_df[mc].median()
-                    else:
-                        up_df[mc] = 0
-
-            # Fill NaNs
-            for c in feat_cols:
-                up_df[c] = pd.to_numeric(up_df[c], errors="coerce")
-                up_df[c] = up_df[c].fillna(main_df[c].median() if c in main_df.columns else 0)
-
-            X_up = up_df[feat_cols]
-            with st.spinner("🤖 Running predictions on uploaded dataset…"):
-                up_df["Predicted_Chemical"] = models["clf"].predict(X_up)
-                up_df["Predicted_Organic"]  = models["clf_org"].predict(X_up)
-                up_df["Predicted_Yield"]    = np.round(
-                    np.clip(models["reg_yield"].predict(X_up), 0.5, 7.0), 2)
-                # Confidence
-                proba_arr = models["clf"].predict_proba(X_up)
-                up_df["Prediction_Confidence_%"] = np.round(proba_arr.max(axis=1)*100, 1)
-
-                # Weather risk
-                up_df["Weather_Risk"] = up_df.apply(
-                    lambda row: weather_risk(
-                        row.get("Temperature_C", 26),
-                        row.get("Rainfall_mm",   5),
-                        row.get("Humidity_Percent",62)), axis=1)
-                up_df["Alert_Status"]  = up_df["Weather_Risk"].map(alert_from_risk)
-
-            st.markdown("**📋 Prediction Results**")
-            st.dataframe(up_df[[c for c in
-                ["Crop","City","Soil_pH","Soil_Nitrogen_kg_per_ha",
-                 "Soil_Phosphorus_kg_per_ha","Soil_Potassium_kg_per_ha",
-                 "Predicted_Chemical","Predicted_Organic","Predicted_Yield",
-                 "Prediction_Confidence_%","Weather_Risk","Alert_Status"]
-                if c in up_df.columns]],
-                use_container_width=True, hide_index=True)
-
-            # Summary charts
-            pc1, pc2 = st.columns(2)
-            with pc1:
-                chem_counts = up_df["Predicted_Chemical"].value_counts().reset_index()
-                chem_counts.columns = ["Fertilizer","Count"]
-                fig_c = px.pie(chem_counts, names="Fertilizer", values="Count",
-                               title="Chemical Fertilizer Distribution",
-                               color_discrete_sequence=px.colors.sequential.Greens_r, hole=0.35)
-                fig_c.update_layout(height=300)
-                st.plotly_chart(fig_c, use_container_width=True)
-            with pc2:
-                fig_y = px.histogram(up_df, x="Predicted_Yield", nbins=20,
-                                     color_discrete_sequence=["#2e7d32"],
-                                     title="Predicted Yield Distribution (t/ha)")
-                fig_y.update_layout(height=300, plot_bgcolor="white")
-                st.plotly_chart(fig_y, use_container_width=True)
-
-            # Download
-            out_buf = BytesIO()
-            up_df.to_excel(out_buf, index=False, engine="openpyxl")
-            st.download_button("📥 Download Predictions Excel", out_buf.getvalue(),
-                               "SoilSense_Predictions.xlsx",
-                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-        except Exception as e:
-            st.error(f"❌ Error processing file: {e}")
-
-    else:
-        st.info("⬆️ Upload a dataset to run bulk predictions.")
-        with st.expander("👁 Preview: Use the built-in Punjab dataset as a sample"):
-            sample = main_df.sample(10, random_state=1).reset_index(drop=True)
-            st.dataframe(sample[[c for c in
-                ["City","Crop","Soil_pH","Soil_Nitrogen_kg_per_ha",
-                 "Soil_Phosphorus_kg_per_ha","Soil_Potassium_kg_per_ha",
-                 "Recommended_Chemical","Recommended_Organic","Yield_ton_per_ha"]
-                if c in sample.columns]], use_container_width=True, hide_index=True)
-
-# ════════════════════════════════════════════════════════════
-# TAB 3 — 42-DAY TRANSITION TRACKER
-# ════════════════════════════════════════════════════════════
-with tab3:
-    st.markdown('<div class="section-title">📅 42-Day Chemical → Organic Transition System</div>', unsafe_allow_html=True)
-
-    if trans_df is None:
-        st.warning(f"⚠️ Transition dataset **{TRANS_DATASET}** not found. Place it in the app folder.")
-    else:
-        st.caption(f"Tracking {trans_df['Farmer_ID'].nunique()} farmers across 42 days of organic transition in Punjab.")
-
-        # Farmer selector
-        t_col1, t_col2, t_col3 = st.columns(3)
-        with t_col1:
-            sel_city = st.selectbox("🏙 Filter by City",
-                                    ["All"] + sorted(trans_df["City"].dropna().unique().tolist()),
-                                    key="t_city")
-        with t_col2:
-            sel_crop = st.selectbox("🌱 Filter by Crop",
-                                    ["All"] + sorted(trans_df["Crop_Name"].dropna().unique().tolist()),
-                                    key="t_crop")
-        with t_col3:
-            sel_arch = st.selectbox("👤 Farmer Archetype",
-                                    ["All"] + sorted(trans_df["Farmer_Archetype"].dropna().unique().tolist()),
-                                    key="t_arch")
-
-        filtered = trans_df.copy()
-        if sel_city != "All" and "City" in filtered.columns:
-            filtered = filtered[filtered["City"]==sel_city]
-        if sel_crop != "All":
-            filtered = filtered[filtered["Crop_Name"]==sel_crop]
-        if sel_arch != "All":
-            filtered = filtered[filtered["Farmer_Archetype"]==sel_arch]
-
-        farmer_list = sorted(filtered["Farmer_ID"].unique())
-        if not farmer_list:
-            st.warning("No farmers match the selected filters."); st.stop()
-
-        sel_farmer = st.selectbox("👨‍🌾 Select Farmer ID", farmer_list, key="t_farmer")
-        farmer_data = filtered[filtered["Farmer_ID"]==sel_farmer].sort_values("Day_Number")
-
-        if farmer_data.empty:
-            st.warning("No data for this farmer."); st.stop()
-
-        d1  = farmer_data[farmer_data["Day_Number"]==1].iloc[0]
-        d42 = farmer_data[farmer_data["Day_Number"]==42].iloc[0]
-
-        # Farmer summary cards
-        st.markdown(f"""
-        **Farmer {sel_farmer}** — 
-        City: `{d1.get('City','N/A')}` · Crop: `{d1.get('Crop_Name','N/A')}` · 
-        Archetype: `{d1.get('Farmer_Archetype','N/A')}`
-        """)
-
-        # Day selector
-        day = st.slider("📅 Select Day to Inspect", 1, 42, 1, key="t_day")
-        day_row = farmer_data[farmer_data["Day_Number"]==day]
-        if not day_row.empty:
-            dr = day_row.iloc[0]
-            phase = transition_phase_label(day)
-            ph_color = PHASE_COLORS.get(phase,"#555")
-            st.markdown(
-                f'<span class="phase-badge" style="background:{ph_color}22;color:{ph_color};'
-                f'border:1px solid {ph_color};">{phase}</span> &nbsp; Day {day} of 42',
-                unsafe_allow_html=True)
-
-            dm1,dm2,dm3,dm4,dm5 = st.columns(5)
-            dm1.metric("🌡 Temp",        f"{dr.get('Current_Temp','N/A')} °C")
-            dm2.metric("🌧 Rain",         f"{dr.get('Current_Rain','N/A')} mm")
-            dm3.metric("💨 Humidity",    f"{dr.get('Current_Hum','N/A')} %")
-            dm4.metric("🧪 Soil pH",     f"{dr.get('Current_Soil_pH','N/A')}")
-            dm5.metric("🌱 OC%",         f"{dr.get('Current_Soil_Organic_Matter_Percent','N/A')}")
-
-            dm6,dm7,dm8,dm9,dm10 = st.columns(5)
-            dm6.metric("🟢 N (kg/ha)",   f"{dr.get('Current_Soil_Nitrogen_kg_per_ha','N/A')}")
-            dm7.metric("🟠 P (kg/ha)",   f"{dr.get('Current_Soil_Phosphorus_kg_per_ha','N/A')}")
-            dm8.metric("🟣 K (kg/ha)",   f"{dr.get('Current_Soil_Potassium_kg_per_ha','N/A')}")
-            dm9.metric("🔄 Recovery",    f"{dr.get('Soil_Recovery_Score','N/A')}")
-            dm10.metric("🏆 Success",    f"{dr.get('Transition_Success_Score','N/A')}")
-
-            a_status = dr.get("Alert_Status","N/A")
-            alert_cls = {"SAFE":"alert-safe","PROCEED WITH CAUTION":"alert-caution",
-                         "DELAY TRANSITION":"alert-caution","STOP TRANSITION":"alert-stop"}
-            st.markdown(
-                f'<div class="{alert_cls.get(a_status,"alert-caution")}">'
-                f'🚨 Alert: <b>{a_status}</b> &nbsp;|&nbsp; '
-                f'Risk: <b>{dr.get("Weather_Risk_Level","N/A")}</b> &nbsp;|&nbsp; '
-                f'Event: <b>{dr.get("Extreme_Event_Flag","None") or "None"}</b></div>',
-                unsafe_allow_html=True)
-
-        st.markdown("---")
-
-        # Day 1 vs Day 42 comparison
-        st.markdown("**📊 Day 1 vs Day 42 — Full Comparison**")
-        comp_data = {
-            "Metric": ["Soil pH","Organic Carbon %","Nitrogen kg/ha",
-                       "Phosphorus kg/ha","Potassium kg/ha",
-                       "Recovery Score","Success Score"],
-            "Day 1":  [d1.get("Current_Soil_pH"),
-                       d1.get("Current_Soil_Organic_Matter_Percent"),
-                       d1.get("Current_Soil_Nitrogen_kg_per_ha"),
-                       d1.get("Current_Soil_Phosphorus_kg_per_ha"),
-                       d1.get("Current_Soil_Potassium_kg_per_ha"),
-                       d1.get("Soil_Recovery_Score"),
-                       d1.get("Transition_Success_Score")],
-            "Day 42": [d42.get("Current_Soil_pH"),
-                       d42.get("Current_Soil_Organic_Matter_Percent"),
-                       d42.get("Current_Soil_Nitrogen_kg_per_ha"),
-                       d42.get("Current_Soil_Phosphorus_kg_per_ha"),
-                       d42.get("Current_Soil_Potassium_kg_per_ha"),
-                       d42.get("Soil_Recovery_Score"),
-                       d42.get("Transition_Success_Score")],
+        weather = {
+            "temperature": data["main"]["temp"],
+            "humidity": data["main"]["humidity"],
+            "condition": data["weather"][0]["main"]
         }
-        comp_df = pd.DataFrame(comp_data)
-        comp_df["Change"] = (comp_df["Day 42"] - comp_df["Day 1"]).round(3)
-        comp_df["Trend"]  = comp_df["Change"].apply(lambda x: "📈 Improved" if x>0 else ("📉 Declined" if x<0 else "➡️ Stable"))
-        st.dataframe(comp_df, use_container_width=True, hide_index=True)
 
-        # 42-day line charts
-        st.markdown("**📈 42-Day Progression Charts**")
-        lc1, lc2 = st.columns(2)
-        with lc1:
-            fig_srs = px.line(farmer_data, x="Day_Number", y="Soil_Recovery_Score",
-                              markers=True, title="Soil Recovery Score over 42 Days",
-                              color_discrete_sequence=["#2e7d32"])
-            fig_srs.add_vline(x=day, line_dash="dash", line_color="red", annotation_text=f"Day {day}")
-            # Shade transition phases
-            for start, end, ph in [(1,6,"Start"),(7,14,"Early Shift"),
-                                    (15,21,"Mid Shift"),(22,35,"Balanced Shift"),
-                                    (36,42,"Organic Dominant")]:
-                fig_srs.add_vrect(x0=start,x1=end,
-                    fillcolor=PHASE_COLORS.get(ph,"#555"),opacity=0.07,layer="below")
-            fig_srs.update_layout(height=320, plot_bgcolor="white")
-            st.plotly_chart(fig_srs, use_container_width=True)
-        with lc2:
-            fig_npk42 = go.Figure()
-            fig_npk42.add_trace(go.Scatter(x=farmer_data["Day_Number"],
-                y=farmer_data["Current_Soil_Nitrogen_kg_per_ha"],
-                name="N", mode="lines+markers", line=dict(color="#2e7d32",width=2)))
-            fig_npk42.add_trace(go.Scatter(x=farmer_data["Day_Number"],
-                y=farmer_data["Current_Soil_Phosphorus_kg_per_ha"],
-                name="P", mode="lines+markers", line=dict(color="#e65100",width=2)))
-            fig_npk42.add_trace(go.Scatter(x=farmer_data["Day_Number"],
-                y=farmer_data["Current_Soil_Potassium_kg_per_ha"],
-                name="K", mode="lines+markers", line=dict(color="#6a1b9a",width=2)))
-            fig_npk42.update_layout(title="NPK Progression over 42 Days",
-                                     height=320, plot_bgcolor="white",
-                                     hovermode="x unified", legend_title="Nutrient")
-            st.plotly_chart(fig_npk42, use_container_width=True)
-
-        # Transition phase timeline
-        st.markdown("**🗓 Transition Phase Timeline**")
-        phase_df = farmer_data[["Day_Number","Transition_Phase","Alert_Status",
-                                  "Soil_Recovery_Score"]].copy()
-        phase_df["Phase_Color"] = phase_df["Transition_Phase"].map(PHASE_COLORS).fillna("#555")
-        fig_phase = px.scatter(phase_df, x="Day_Number", y="Soil_Recovery_Score",
-                               color="Transition_Phase",
-                               color_discrete_map=PHASE_COLORS,
-                               size_max=12,
-                               title="Recovery Score by Transition Phase",
-                               hover_data=["Alert_Status"])
-        fig_phase.update_layout(height=300, plot_bgcolor="white")
-        st.plotly_chart(fig_phase, use_container_width=True)
-
-        # All farmers archetype comparison
-        st.markdown("**👥 Archetype Comparison — Day 1 → Day 42**")
-        arch_summary = []
-        for arch in trans_df["Farmer_Archetype"].unique():
-            sub = trans_df[trans_df["Farmer_Archetype"]==arch]
-            d1s  = sub[sub["Day_Number"]==1]
-            d42s = sub[sub["Day_Number"]==42]
-            arch_summary.append({
-                "Archetype": arch,
-                "Farmers": sub["Farmer_ID"].nunique(),
-                "Day1 Recovery":  round(d1s["Soil_Recovery_Score"].mean(),1),
-                "Day42 Recovery": round(d42s["Soil_Recovery_Score"].mean(),1),
-                "Recovery Gain":  round(d42s["Soil_Recovery_Score"].mean() -
-                                        d1s["Soil_Recovery_Score"].mean(),1),
-                "Day1 Success":   round(d1s["Transition_Success_Score"].mean(),1),
-                "Day42 Success":  round(d42s["Transition_Success_Score"].mean(),1),
-            })
-        st.dataframe(pd.DataFrame(arch_summary), use_container_width=True, hide_index=True)
-
-# ════════════════════════════════════════════════════════════
-# TAB 4 — MODEL & DATASET INSIGHTS
-# ════════════════════════════════════════════════════════════
-with tab4:
-    st.markdown('<div class="section-title">📊 Model & Dataset Insights</div>', unsafe_allow_html=True)
-
-    ins1, ins2 = st.columns(2)
-    with ins1:
-        # Feature importance
-        imp_df = models["importances"].reset_index()
-        imp_df.columns = ["Feature","Importance"]
-        fig_imp = px.bar(imp_df, x="Importance", y="Feature", orientation="h",
-                         color="Importance", color_continuous_scale="Greens",
-                         text=imp_df["Importance"].round(3),
-                         title="RandomForest Feature Importances")
-        fig_imp.update_traces(textposition="outside")
-        fig_imp.update_layout(height=480, plot_bgcolor="white",
-                               yaxis={"categoryorder":"total ascending"},
-                               coloraxis_showscale=False)
-        st.plotly_chart(fig_imp, use_container_width=True)
-
-    with ins2:
-        # Chemical distribution
-        chem_dist = main_df["Recommended_Chemical"].value_counts().reset_index()
-        chem_dist.columns = ["Fertilizer","Count"]
-        fig_cd = px.bar(chem_dist, x="Fertilizer", y="Count", text="Count",
-                        color="Fertilizer", title="Chemical Fertilizer Distribution",
-                        color_discrete_sequence=px.colors.sequential.Greens)
-        fig_cd.update_traces(textposition="outside")
-        fig_cd.update_layout(height=280, plot_bgcolor="white", showlegend=False)
-        st.plotly_chart(fig_cd, use_container_width=True)
-
-        # Crop distribution
-        crop_dist = main_df["Crop"].value_counts().reset_index()
-        crop_dist.columns = ["Crop","Count"]
-        fig_cr = px.pie(crop_dist, names="Crop", values="Count",
-                        title="Crop Distribution",
-                        color_discrete_sequence=px.colors.sequential.Greens_r, hole=0.35)
-        fig_cr.update_layout(height=280)
-        st.plotly_chart(fig_cr, use_container_width=True)
-
-    # City NPK heatmap
-    st.markdown("**🗺 City-wise Average NPK (Punjab)**")
-    city_npk = main_df.groupby("City")[
-        ["Soil_Nitrogen_kg_per_ha","Soil_Phosphorus_kg_per_ha",
-         "Soil_Potassium_kg_per_ha","Soil_pH","Yield_ton_per_ha"]
-    ].mean().round(2).reset_index()
-    city_npk.columns = ["City","Avg N","Avg P","Avg K","Avg pH","Avg Yield"]
-    st.dataframe(city_npk, use_container_width=True, hide_index=True)
-
-    fig_city = px.bar(city_npk.melt(id_vars="City", value_vars=["Avg N","Avg P","Avg K"]),
-                      x="City", y="value", color="variable", barmode="group",
-                      text="value", title="Average NPK by City (Punjab)",
-                      color_discrete_sequence=["#2e7d32","#e65100","#6a1b9a"],
-                      labels={"value":"kg/ha","variable":"Nutrient"})
-    fig_city.update_traces(textposition="outside")
-    fig_city.update_layout(height=360, plot_bgcolor="white")
-    st.plotly_chart(fig_city, use_container_width=True)
-
-    # Yield distribution
-    fig_yld = px.histogram(main_df, x="Yield_ton_per_ha",
-                            color="Recommended_Chemical", nbins=40,
-                            color_discrete_sequence=px.colors.qualitative.Set2,
-                            title="Yield Distribution by Fertilizer Type",
-                            barmode="overlay", opacity=0.7,
-                            labels={"Yield_ton_per_ha":"Yield (t/ha)"})
-    fig_yld.update_layout(height=340, plot_bgcolor="white")
-    st.plotly_chart(fig_yld, use_container_width=True)
-
-    # N vs P scatter
-    sample = main_df.sample(min(500, len(main_df)), random_state=42)
-    fig_sc = px.scatter(sample, x="Soil_Nitrogen_kg_per_ha", y="Soil_Phosphorus_kg_per_ha",
-                        color="Recommended_Chemical", opacity=0.6,
-                        title="N vs P — Fertilizer Classification",
-                        hover_data=["Crop","City","Yield_ton_per_ha"],
-                        labels={"Soil_Nitrogen_kg_per_ha":"Nitrogen (kg/ha)",
-                                "Soil_Phosphorus_kg_per_ha":"Phosphorus (kg/ha)"})
-    fig_sc.update_layout(height=380, plot_bgcolor="white")
-    st.plotly_chart(fig_sc, use_container_width=True)
-
-    with st.expander("📋 View Raw Dataset Sample (20 rows)"):
-        st.dataframe(main_df.sample(20, random_state=7).reset_index(drop=True),
-                     use_container_width=True)
-        st.caption(f"Total: {len(main_df):,} training records from Punjab")
-
-# ════════════════════════════════════════════════════════════
-# TAB 5 — WEATHER & ALERTS
-# ════════════════════════════════════════════════════════════
-with tab5:
-    st.markdown('<div class="section-title">🌤 Live Weather & Safety Engine — Punjab</div>', unsafe_allow_html=True)
-
-    wc1, wc2 = st.columns([1,2])
-    with wc1:
-        w_city = st.selectbox("📍 Select City", CITIES, key="w_city_sel")
-        w_data = get_weather(w_city, API_KEY)
-
-        st.markdown(f"**Current Weather — {w_city}**")
-        wm1,wm2 = st.columns(2)
-        wm1.metric("🌡 Temperature", f"{w_data['temperature']} °C")
-        wm2.metric("💧 Humidity",    f"{w_data['humidity']} %")
-        wm3,wm4 = st.columns(2)
-        wm3.metric("🌧 Rainfall",   f"{w_data['rainfall']} mm")
-        wm4.metric("💨 Wind",       f"{w_data['wind_speed']} m/s")
-        st.caption(f"🌥 {w_data['description']}")
-        if w_data.get("error"):
-            st.warning(f"⚠️ {w_data['error']} — showing default values")
-
-        # Compute risk
-        w_risk  = weather_risk(w_data["temperature"], w_data["rainfall"], w_data["humidity"])
-        w_alert = alert_from_risk(w_risk)
-        rc = WEATHER_RISK_COLORS.get(w_risk,"#555")
-        st.markdown(
-            f'<div style="background:{rc}18;border-left:5px solid {rc};'
-            f'padding:12px;border-radius:8px;margin-top:12px;">'
-            f'<b style="color:{rc}">⚡ Risk: {w_risk}</b><br>'
-            f'<span style="color:{rc}">{w_alert}</span></div>',
-            unsafe_allow_html=True)
-
-    with wc2:
-        # All 5 cities weather comparison
-        st.markdown("**All Punjab Cities — Live Weather Comparison**")
-        city_weather = []
-        for c in CITIES:
-            wd = get_weather(c, API_KEY)
-            risk = weather_risk(wd["temperature"], wd["rainfall"], wd["humidity"])
-            city_weather.append({
-                "City": c, "Temp (°C)": wd["temperature"],
-                "Humidity (%)": wd["humidity"], "Rain (mm)": wd["rainfall"],
-                "Risk": risk, "Alert": alert_from_risk(risk),
-            })
-        cw_df = pd.DataFrame(city_weather)
-        st.dataframe(cw_df, use_container_width=True, hide_index=True)
-
-        fig_cw = px.bar(cw_df, x="City", y="Temp (°C)", color="Risk",
-                        color_discrete_map=WEATHER_RISK_COLORS,
-                        text="Temp (°C)", title="Temperature & Risk Level by City")
-        fig_cw.update_traces(textposition="outside")
-        fig_cw.update_layout(height=320, plot_bgcolor="white")
-        st.plotly_chart(fig_cw, use_container_width=True)
-
-    # Extreme event info
-    st.markdown("**⛈ Extreme Event Impact on Transition**")
-    if trans_df is not None:
-        event_df = trans_df[trans_df["Extreme_Event_Flag"].notna()].copy()
-        if not event_df.empty:
-            ev_summary = event_df.groupby("Extreme_Event_Flag").agg(
-                Occurrences=("Farmer_ID","count"),
-                Avg_Recovery=("Soil_Recovery_Score","mean"),
-                Avg_Success=("Transition_Success_Score","mean"),
-            ).round(2).reset_index()
-            ev_summary.columns = ["Event","Occurrences","Avg Recovery Score","Avg Success Score"]
-            st.dataframe(ev_summary, use_container_width=True, hide_index=True)
-
-            fig_ev = px.bar(ev_summary, x="Event", y="Avg Recovery Score",
-                            color="Event", text="Avg Recovery Score",
-                            title="Avg Soil Recovery Score per Extreme Event",
-                            color_discrete_sequence=["#c62828","#e65100","#1565c0","#6a1b9a"])
-            fig_ev.update_traces(textposition="outside")
-            fig_ev.update_layout(height=320, plot_bgcolor="white", showlegend=False)
-            st.plotly_chart(fig_ev, use_container_width=True)
-
-    # Weather safety guide
-    with st.expander("📖 Weather Safety Guide for Organic Transition"):
-        st.markdown("""
-| Risk Level | Temperature | Rainfall | Action |
-|---|---|---|---|
-| 🟢 **Low** | 18–32°C | 0–40 mm | ✅ **SAFE** — Proceed with transition |
-| 🟡 **Medium** | 32–38°C | 40–80 mm | ⚠️ **PROCEED WITH CAUTION** |
-| 🔶 **High** | >38°C or heavy rain | >80 mm | 🔶 **DELAY TRANSITION** — Wait for better conditions |
-| 🔴 **Extreme** | >40°C or flood/drought | Any | 🛑 **STOP TRANSITION** — Protect soil first |
-
-**Extreme Events:**
-- **Drought** → Delay fertilizer application; irrigate first
-- **Heatwave** → Stop chemical application; apply mulch
-- **Flood** → Stop all transition activity; assess soil damage
-- **Storm** → Delay until soil stabilises
-        """)
-
-# ─────────────────────────────────────────────────────────
-# SAFE WEATHER VALUE HANDLER
-# ─────────────────────────────────────────────────────────
-def safe_widget_value(value, default, minv, maxv):
-    try:
-        # Handle None / empty
-        if value is None or value == "":
-            return float(default)
-
-        # Convert to float
-        value = float(value)
-
-        # Handle NaN
-        if np.isnan(value):
-            return float(default)
-
-        # Clamp within range
-        value = max(minv, min(maxv, value))
-
-        return float(value)
+        return weather
 
     except:
-        return float(default)
+
+        return {
+            "temperature": 30,
+            "humidity": 60,
+            "condition": "Clear"
+        }
+
+# =====================================================
+# DATASET LOADER
+# =====================================================
+
+@st.cache_data
+
+def load_dataset(file):
+
+    if file.name.endswith("csv"):
+        df = pd.read_csv(file)
+    else:
+        df = pd.read_excel(file)
+
+    return df
+
+# =====================================================
+# PREPROCESSING
+# =====================================================
 
 
-# ─────────────────────────────────────────────────────────
-# WEATHER (SAFE VERSION)
-# ─────────────────────────────────────────────────────────
-st.markdown("**🌤 Weather (auto-filled from live API)**")
+def preprocess_data(df):
 
-# Fetch weather
-w_data = get_weather(city, API_KEY)
+    df = df.copy()
 
-# Safe values
-_temp_val = safe_widget_value(
-    w_data.get("temperature"),
-    default=26.0,
-    minv=10.0,
-    maxv=50.0
-)
+    df.drop_duplicates(inplace=True)
 
-_hum_val = safe_widget_value(
-    w_data.get("humidity"),
-    default=62.0,
-    minv=20.0,
-    maxv=98.0
-)
+    df.fillna(method="ffill", inplace=True)
 
-_rain_val = safe_widget_value(
-    w_data.get("rainfall"),
-    default=0.0,
-    minv=0.0,
-    maxv=150.0
-)
+    categorical_cols = [
+        "Region",
+        "Crop_Name",
+        "Weather_Risk_Level",
+        "Transition_Phase",
+        "Farmer_Archetype"
+    ]
 
-# ─────────────────────────────────────────────────────────
-# FIX SESSION STATE CORRUPTION
-# ─────────────────────────────────────────────────────────
-if "m_temp" in st.session_state:
-    st.session_state.m_temp = safe_widget_value(
-        st.session_state.m_temp, 26.0, 10.0, 50.0
+    encoders = {}
+
+    for col in categorical_cols:
+
+        if col in df.columns:
+
+            le = LabelEncoder()
+
+            df[col] = le.fit_transform(df[col].astype(str))
+
+            encoders[col] = le
+
+    return df, encoders
+
+# =====================================================
+# TRAIN MODEL
+# =====================================================
+
+
+def train_model(df):
+
+    df, encoders = preprocess_data(df)
+
+    feature_columns = [
+        "Current_Temp",
+        "Current_Rain",
+        "Current_Hum",
+        "Current_Soil_pH",
+        "Current_Soil_Organic_Matter_Percent",
+        "Current_Soil_Nitrogen_kg_per_ha",
+        "Current_Soil_Phosphorus_kg_per_ha",
+        "Current_Soil_Potassium_kg_per_ha",
+        "Soil_Recovery_Score",
+        "Weekly_Improvement_Percent",
+        "Transition_Success_Score",
+        "Region",
+        "Crop_Name"
+    ]
+
+    target_column = "Alert_Status"
+
+    X = df[feature_columns]
+
+    y = df[target_column]
+
+    target_encoder = LabelEncoder()
+
+    y = target_encoder.fit_transform(y)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42
     )
 
-if "m_hum" in st.session_state:
-    st.session_state.m_hum = safe_widget_value(
-        st.session_state.m_hum, 62.0, 20.0, 98.0
+    model = RandomForestClassifier(
+        n_estimators=300,
+        random_state=42
     )
 
-if "m_rain" in st.session_state:
-    st.session_state.m_rain = safe_widget_value(
-        st.session_state.m_rain, 0.0, 0.0, 150.0
+    model.fit(X_train, y_train)
+
+    predictions = model.predict(X_test)
+
+    accuracy = accuracy_score(y_test, predictions)
+
+    os.makedirs("model", exist_ok=True)
+
+    joblib.dump(model, "model/soil_model.pkl")
+    joblib.dump(encoders, "model/encoders.pkl")
+    joblib.dump(target_encoder, "model/target_encoder.pkl")
+
+    return accuracy
+
+# =====================================================
+# LOAD MODEL
+# =====================================================
+
+
+def load_model_files():
+
+    model = joblib.load("model/soil_model.pkl")
+
+    encoders = joblib.load("model/encoders.pkl")
+
+    target_encoder = joblib.load("model/target_encoder.pkl")
+
+    return model, encoders, target_encoder
+
+# =====================================================
+# PREDICTION ENGINE
+# =====================================================
+
+
+def predict_alert(df):
+
+    model, encoders, target_encoder = load_model_files()
+
+    categorical_cols = [
+        "Region",
+        "Crop_Name"
+    ]
+
+    for col in categorical_cols:
+
+        if col in df.columns:
+
+            df[col] = encoders[col].transform(df[col].astype(str))
+
+    prediction = model.predict(df)
+
+    prediction = target_encoder.inverse_transform(prediction)
+
+    return prediction
+
+# =====================================================
+# SIDEBAR MENU
+# =====================================================
+
+menu = st.sidebar.radio(
+    "Navigation",
+    [
+        "Home",
+        "Train Model",
+        "Dataset Prediction",
+        "Manual Prediction",
+        "Weather Dashboard"
+    ]
+)
+
+# =====================================================
+# HOME PAGE
+# =====================================================
+
+if menu == "Home":
+
+    st.markdown("""
+    ## 🌾 Welcome to SOIL SENSE
+
+    This AI system can:
+
+    - Train machine learning models
+    - Predict soil recovery
+    - Analyze NPK progression
+    - Predict SAFE / DELAY / STOP alerts
+    - Analyze weather risks
+    - Support fertilizer transition planning
+    - Compare weekly soil progression
+    """)
+
+# =====================================================
+# TRAIN MODEL PAGE
+# =====================================================
+
+elif menu == "Train Model":
+
+    st.header("📊 Train Soil Recovery Model")
+
+    uploaded_file = st.file_uploader(
+        "Upload Punjab Smart Agriculture Dataset",
+        type=["xlsx", "csv"]
     )
 
-# ─────────────────────────────────────────────────────────
-# SAFE INPUT WIDGETS
-# ─────────────────────────────────────────────────────────
-temp = st.number_input(
-    "Temperature (°C)",
-    min_value=10.0,
-    max_value=50.0,
-    value=float(_temp_val),
-    step=0.5,
-    key="m_temp"
-)
+    if uploaded_file:
 
-hum = st.number_input(
-    "Humidity (%)",
-    min_value=20.0,
-    max_value=98.0,
-    value=float(_hum_val),
-    step=0.5,
-    key="m_hum"
-)
+        df = load_dataset(uploaded_file)
 
-rain = st.number_input(
-    "Rainfall (mm)",
-    min_value=0.0,
-    max_value=150.0,
-    value=float(_rain_val),
-    step=0.5,
-    key="m_rain"
-)
+        st.success("Dataset Loaded Successfully")
 
-# ─────────────────────────────────────────────────────────
-# WEATHER STATUS
-# ─────────────────────────────────────────────────────────
-if w_data.get("error"):
-    st.warning(
-        f"⚠️ Weather API Error: {w_data['error']} "
-        f"— Using safe default values."
+        st.write(df.head())
+
+        st.write("Dataset Shape:", df.shape)
+
+        if st.button("Train ML Model"):
+
+            accuracy = train_model(df)
+
+            st.success("Model Training Completed")
+
+            st.metric(
+                "Model Accuracy",
+                f"{accuracy:.2f}"
+            )
+
+# =====================================================
+# DATASET PREDICTION PAGE
+# =====================================================
+
+elif menu == "Dataset Prediction":
+
+    st.header("📁 Dataset Prediction")
+
+    prediction_file = st.file_uploader(
+        "Upload Dataset for Prediction",
+        type=["xlsx", "csv"]
     )
-else:
-    st.success(f"✅ Live weather loaded for {city}")
 
-# ─────────────────────────────────────────────────────────
-# FOOTER
-# ─────────────────────────────────────────────────────────
-st.divider()
-st.caption(
-    "🌾 **SoilSense Punjab** · 5 ML Models · 800-row calibrated dataset · "
-    "42-day organic transition tracking · PAU/ICAR/SHC calibrated · "
-    "Cities: Mohali, Amritsar, Jalandhar, Ropar, Ludhiana · "
-    "Crops: Wheat, Rice, Cotton, Mustard, Gram · Built with Streamlit"
-)
-)
+    if prediction_file:
+
+        df = load_dataset(prediction_file)
+
+        st.write(df.head())
+
+        if st.button("Run Prediction"):
+
+            feature_columns = [
+                "Current_Temp",
+                "Current_Rain",
+                "Current_Hum",
+                "Current_Soil_pH",
+                "Current_Soil_Organic_Matter_Percent",
+                "Current_Soil_Nitrogen_kg_per_ha",
+                "Current_Soil_Phosphorus_kg_per_ha",
+                "Current_Soil_Potassium_kg_per_ha",
+                "Soil_Recovery_Score",
+                "Weekly_Improvement_Percent",
+                "Transition_Success_Score",
+                "Region",
+                "Crop_Name"
+            ]
+
+            prediction_input = df[feature_columns]
+
+            predictions = predict_alert(prediction_input)
+
+            df["Predicted_Alert_Status"] = predictions
+
+            st.success("Prediction Completed")
+
+            st.write(df.head())
+
+            csv = df.to_csv(index=False).encode("utf-8")
+
+            st.download_button(
+                label="Download Predictions",
+                data=csv,
+                file_name="soil_predictions.csv",
+                mime="text/csv"
+            )
+
+# =====================================================
+# MANUAL PREDICTION PAGE
+# =====================================================
+
+elif menu == "Manual Prediction":
+
+    st.header("🧠 Manual Prediction")
+
+    crop = st.selectbox(
+        "Crop Name",
+        ["Wheat", "Rice", "Cotton", "Maize"]
+    )
+
+    region = st.selectbox(
+        "Region",
+        ["Punjab", "Haryana", "UP"]
+    )
+
+    city = st.text_input(
+        "Enter City",
+        "Ludhiana"
+    )
+
+    ph = st.slider(
+        "Soil pH",
+        0.0,
+        14.0,
+        6.5
+    )
+
+    nitrogen = st.number_input(
+        "Nitrogen",
+        value=100
+    )
+
+    phosphorus = st.number_input(
+        "Phosphorus",
+        value=60
+    )
+
+    potassium = st.number_input(
+        "Potassium",
+        value=70
+    )
+
+    organic = st.slider(
+        "Organic Matter",
+        0.0,
+        10.0,
+        2.5
+    )
+
+    recovery_score = st.slider(
+        "Soil Recovery Score",
+        0,
+        100,
+        70
+    )
+
+    weekly_improvement = st.slider(
+        "Weekly Improvement %",
+        0,
+        100,
+        10
+    )
+
+    transition_score = st.slider(
+        "Transition Success Score",
+        0,
+        100,
+        75
+    )
+
+    if st.button("Predict Alert"):
+
+        weather = get_weather(city)
+
+        input_df = pd.DataFrame({
+            "Current_Temp": [weather["temperature"]],
+            "Current_Rain": [10],
+            "Current_Hum": [weather["humidity"]],
+            "Current_Soil_pH": [ph],
+            "Current_Soil_Organic_Matter_Percent": [organic],
+            "Current_Soil_Nitrogen_kg_per_ha": [nitrogen],
+            "Current_Soil_Phosphorus_kg_per_ha": [phosphorus],
+            "Current_Soil_Potassium_kg_per_ha": [potassium],
+            "Soil_Recovery_Score": [recovery_score],
+            "Weekly_Improvement_Percent": [weekly_improvement],
+            "Transition_Success_Score": [transition_score],
+            "Region": [region],
+            "Crop_Name": [crop]
+        })
+
+        prediction = predict_alert(input_df)
+
+        st.success(f"Prediction Result: {prediction[0]}")
+
+        if prediction[0] == "STOP":
+            st.error("⚠️ Unsafe Conditions Detected")
+
+        elif prediction[0] == "DELAY":
+            st.warning("⚠️ Delay Recommended")
+
+        else:
+            st.success("✅ Safe Transition")
+
+# =====================================================
+# WEATHER DASHBOARD
+# =====================================================
+
+elif menu == "Weather Dashboard":
+
+    st.header("☁️ Weather Monitoring")
+
+    city = st.text_input(
+        "City Name",
+        "Ludhiana"
+    )
+
+    if st.button("Get Weather Information"):
+
+        weather = get_weather(city)
+
+        st.metric(
+            "Temperature",
+            f"{weather['temperature']} °C"
+        )
+
+        st.metric(
+            "Humidity",
+            f"{weather['humidity']} %"
+        )
+
+        st.write(
+            f"Weather Condition: {weather['condition']}"
+        )
+
+        if weather['temperature'] > 40:
+            st.error("⚠️ Extreme Heat Warning")
+
+        if weather['humidity'] < 20:
+            st.warning("⚠️ Drought Risk Warning")
+
+        if weather['humidity'] > 90:
+            st.warning("⚠️ Excess Moisture Warning")
+
+```
+
+---
+
+# Install Requirements
+
+```bash
+pip install streamlit pandas numpy scikit-learn openpyxl requests joblib
+```
+
+---
+
+# Run Application
+
+```bash
+streamlit run app.py
+```
+
+---
+
+# IMPORTANT
+
+Replace:
+
+```python
+API_KEY = "YOUR_OPENWEATHER_API_KEY"
+```
+
+with your real OpenWeather API key.
+
