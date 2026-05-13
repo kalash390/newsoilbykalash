@@ -1,3 +1,5 @@
+# .streamlit/secrets.toml  (on Streamlit Cloud: Settings → Secrets)
+# OWM_API_KEY = "cb81120197f345ae396cd0fa28c1827c"
 
 
 
@@ -1782,7 +1784,7 @@ st.subheader("AI-Based Soil Recovery & Fertilizer Transition System")
 # WEATHER API
 # =====================================================
 
-API_KEY = "YOUR_OPENWEATHER_API_KEY"
+API_KEY = "cb81120197f345ae396cd0fa28c1827c"
 
 
 def get_weather(city):
