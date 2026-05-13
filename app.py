@@ -6746,12 +6746,13 @@ with tab1:
 
         st.markdown("**🌤 Weather (auto-filled from live API)**")
         w_data = get_weather(city, API_KEY)
-        temp   = st.number_input("Temperature (°C)", 10.0, 50.0,
-                                  float(w_data.get("temperature", 26)), step=0.5, key="m_temp")
-        hum    = st.number_input("Humidity (%)",      20.0, 98.0,
-                                  float(w_data.get("humidity", 62)),    step=0.5, key="m_hum")
-        rain   = st.number_input("Rainfall (mm)",      0.0,150.0,
-                                  float(w_data.get("rainfall",  0)),    step=0.5, key="m_rain")
+        # Clamp all API values to widget bounds before passing as defaults
+        _temp_val = float(max(10.0, min(50.0, w_data.get("temperature", 26) or 26)))
+        _hum_val  = float(max(20.0, min(98.0, w_data.get("humidity",    62) or 62)))
+        _rain_val = float(max(0.0,  min(150.0,w_data.get("rainfall",     0) or  0)))
+        temp   = st.number_input("Temperature (°C)", 10.0, 50.0,  _temp_val, step=0.5, key="m_temp")
+        hum    = st.number_input("Humidity (%)",      20.0, 98.0,  _hum_val,  step=0.5, key="m_hum")
+        rain   = st.number_input("Rainfall (mm)",      0.0, 150.0, _rain_val, step=0.5, key="m_rain")
 
         if w_data.get("error"):
             st.warning(f"⚠️ Weather API: {w_data['error']} — using defaults")
@@ -7381,4 +7382,5 @@ st.caption(
     "42-day organic transition tracking · PAU/ICAR/SHC calibrated · "
     "Cities: Mohali, Amritsar, Jalandhar, Ropar, Ludhiana · "
     "Crops: Wheat, Rice, Cotton, Mustard, Gram · Built with Streamlit"
+)
 )
