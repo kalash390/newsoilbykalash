@@ -2851,7 +2851,6 @@
 #   Graph 1 — NPK comparison: chemical vs organic transition (ideal)
 #   Graph 2 — NPK comparison: initial values vs weather-based prediction
 # """
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -2864,9 +2863,15 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.metrics import mean_absolute_error, r2_score
 import warnings
+import requests
+from pathlib import Path
 warnings.filterwarnings("ignore")
 
-# ── Page config ──────────────────────────────────────────────────────────────
+# Resolve dataset path relative to this script (works locally AND on Streamlit Cloud)
+BASE_DIR = Path(__file__).parent
+DATASET_PATH = BASE_DIR / "Punjab_Smart_Agri_Ecosystem_Dataset.xlsx"
+
+# -- Page config --------------------------------------------------------------
 st.set_page_config(
     page_title="Punjab Smart Agri Ecosystem",
     page_icon="🌾",
@@ -2874,7 +2879,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Custom CSS ────────────────────────────────────────────────────────────────
+# -- Custom CSS ----------------------------------------------------------------
 st.markdown("""
 <style>
     .main-header {
@@ -2922,9 +2927,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # DATA & MODEL (cached)
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 
 FEATURE_COLS = [
     'Current_Temp', 'Current_Rain', 'Current_Hum',
@@ -2958,7 +2963,7 @@ CROP_ICONS = {
 
 @st.cache_data
 def load_data():
-    df = pd.read_excel("Punjab_Smart_Agri_Ecosystem_Dataset.xlsx")
+    df = pd.read_excel(DATASET_PATH)
     return df
 
 @st.cache_resource
@@ -3011,7 +3016,62 @@ def build_model(df):
 
     return model, scaler, encoders, df, metrics
 
-# ── Weather helpers ────────────────────────────────────────────────────────────
+# -- Weather helpers ------------------------------------------------------------
+
+# Punjab major cities with lat/lon for Open-Meteo API
+PUNJAB_CITIES = {
+    "Ludhiana"   : (30.9010, 75.8573),
+    "Amritsar"   : (31.6340, 74.8723),
+    "Jalandhar"  : (31.3260, 75.5762),
+    "Patiala"    : (30.3398, 76.3869),
+    "Bathinda"   : (30.2110, 74.9455),
+    "Mohali"     : (30.7046, 76.7179),
+    "Pathankot"  : (32.2643, 75.6522),
+    "Hoshiarpur" : (31.5143, 75.9115),
+    "Ferozepur"  : (30.9254, 74.6226),
+    "Sangrur"    : (30.2447, 75.8436),
+}
+
+@st.cache_data(ttl=1800)   # cache 30 min
+def fetch_live_weather(city: str):
+    """
+    Fetch current weather for a Punjab city using Open-Meteo (free, no API key).
+    Returns dict with temp, rain (last hour), humidity, description, or None on failure.
+    """
+    lat, lon = PUNJAB_CITIES.get(city, (30.9010, 75.8573))
+    url = (
+        "https://api.open-meteo.com/v1/forecast"
+        f"?latitude={lat}&longitude={lon}"
+        "&current=temperature_2m,relative_humidity_2m,"
+        "precipitation,weather_code,wind_speed_10m"
+        "&timezone=Asia%2FKolkata"
+    )
+    try:
+        resp = requests.get(url, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()["current"]
+        wcode = data.get("weather_code", 0)
+        # WMO weather code -> description
+        if wcode == 0:         desc = "Clear sky"
+        elif wcode <= 3:       desc = "Partly cloudy"
+        elif wcode <= 49:      desc = "Fog / drizzle"
+        elif wcode <= 69:      desc = "Rain"
+        elif wcode <= 79:      desc = "Snow / sleet"
+        elif wcode <= 82:      desc = "Rain showers"
+        elif wcode <= 99:      desc = "Thunderstorm"
+        else:                  desc = "Unknown"
+        return {
+            "temp"     : round(data["temperature_2m"], 1),
+            "rain"     : round(data["precipitation"] * 7, 1),   # hourly -> est. weekly
+            "humidity" : round(data["relative_humidity_2m"], 1),
+            "wind"     : round(data["wind_speed_10m"], 1),
+            "desc"     : desc,
+            "city"     : city,
+            "lat"      : lat,
+            "lon"      : lon,
+        }
+    except Exception:
+        return None
 
 def classify_weather(temp, rain, humidity):
     extreme_event = 'None'
@@ -3027,9 +3087,9 @@ def classify_weather(temp, rain, humidity):
         risk = 'Low'
     return risk, extreme_event
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TOOL 1 — Ideal 42-day NPK Transition
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# TOOL 1 - Ideal 42-day NPK Transition
+# -----------------------------------------------------------------------------
 
 def tool1_ideal_42day(model, scaler, df, encoders, crop_name,
                       start_N, start_P, start_K,
@@ -3087,9 +3147,9 @@ def tool1_ideal_42day(model, scaler, df, encoders, crop_name,
 
     return pd.DataFrame(results)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TOOL 2 — Real-world 42-day NPK
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# TOOL 2 - Real-world 42-day NPK
+# -----------------------------------------------------------------------------
 
 def tool2_realworld_42day(model, scaler, encoders, crop_name,
                           start_N, start_P, start_K,
@@ -3168,9 +3228,9 @@ def tool2_realworld_42day(model, scaler, encoders, crop_name,
 
     return pd.DataFrame(results)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TOOL 3 — Crop growth stage
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# TOOL 3 - Crop growth stage
+# -----------------------------------------------------------------------------
 
 def tool3_crop_stage(df, crop_name, current_N, current_P, current_K,
                      current_recovery, current_week):
@@ -3210,15 +3270,15 @@ def tool3_crop_stage(df, crop_name, current_N, current_P, current_K,
         'overall_health': overall, 'recommendation': advice,
     }
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # PLOT FUNCTIONS
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 
 def plot_graph1(df, crop_name):
     fig = make_subplots(
         rows=2, cols=1, shared_xaxes=True,
         subplot_titles=("NPK Soil Levels Over 42 Days",
-                        "Chemical ↓ Declining  |  Organic ↑ Rising"),
+                        "Chemical (down) Declining  |  Organic (up) Rising"),
         vertical_spacing=0.12, row_heights=[0.6, 0.4],
     )
 
@@ -3250,7 +3310,7 @@ def plot_graph1(df, crop_name):
                           line_color='rgba(150,150,150,0.5)', row=row, col=1)
 
     fig.update_layout(
-        title=dict(text=f"🌾 Graph 1 — NPK Transition: Chemical → Organic  |  {crop_name}  |  Ideal Conditions",
+        title=dict(text=f"🌾 Graph 1 - NPK Transition: Chemical -> Organic  |  {crop_name}  |  Ideal Conditions",
                    font=dict(size=15, color='#1a6b2e')),
         height=600, hovermode='x unified',
         legend=dict(orientation='h', y=-0.15),
@@ -3269,7 +3329,7 @@ def plot_graph2(df1, df2, crop_name, start_N, start_P, start_K):
         ('Potassium_kg_ha',  'Potassium (K)',  start_K, '#2E7D32'),
     ]
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
-                        subplot_titles=[f"{label} — Initial vs Predicted" for _, label, _, _ in nutrients],
+                        subplot_titles=[f"{label} - Initial vs Predicted" for _, label, _, _ in nutrients],
                         vertical_spacing=0.08)
 
     for i, (col, label, start_val, color) in enumerate(nutrients, start=1):
@@ -3320,7 +3380,7 @@ def plot_graph2(df1, df2, crop_name, start_N, start_P, start_K):
                           line_color='rgba(150,150,150,0.4)', row=row, col=1)
 
     fig.update_layout(
-        title=dict(text=f"📊 Graph 2 — NPK Comparison: Initial vs Weather-Based Prediction  |  {crop_name}",
+        title=dict(text=f"📊 Graph 2 - NPK Comparison: Initial vs Weather-Based Prediction  |  {crop_name}",
                    font=dict(size=15, color='#1a6b2e')),
         height=800, hovermode='x unified',
         legend=dict(orientation='h', y=-0.06),
@@ -3378,9 +3438,9 @@ def plot_stage_progress(result):
     return fig
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # DATASET OVERVIEW TAB
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 
 def tab_dataset_overview(df):
     st.markdown('<div class="section-title">📂 Dataset Overview</div>', unsafe_allow_html=True)
@@ -3437,16 +3497,90 @@ def tab_dataset_overview(df):
         st.dataframe(df.head(100), use_container_width=True)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 # MAIN APP
-# ═══════════════════════════════════════════════════════════════════════════════
+# ===============================================================================
 
 def main():
+    # -- Sidebar: Live Weather -------------------------------------------------
+    with st.sidebar:
+        st.markdown("## 🌤 Live Punjab Weather")
+        selected_city = st.selectbox("Select City", list(PUNJAB_CITIES.keys()), index=0)
+
+        weather_data = None
+        if st.button("🔄 Fetch Live Weather", use_container_width=True):
+            with st.spinner(f"Fetching weather for {selected_city}..."):
+                weather_data = fetch_live_weather(selected_city)
+                st.session_state['live_weather'] = weather_data
+        elif 'live_weather' in st.session_state:
+            weather_data = st.session_state['live_weather']
+
+        if weather_data:
+            risk, event = classify_weather(
+                weather_data['temp'], weather_data['rain'], weather_data['humidity'])
+            risk_emoji = {'Extreme': '🔴', 'High': '🟠', 'Medium': '🟡', 'Low': '🟢'}.get(risk, '🟢')
+            event_txt  = f" | ⚠ {event}" if event != 'None' else ""
+
+            st.markdown(f"""
+            <div style='background:#e8f5e9;border-radius:10px;padding:1rem;margin-top:0.5rem;'>
+                <div style='font-size:1.1rem;font-weight:700;color:#1a6b2e;'>{selected_city}</div>
+                <div style='font-size:0.8rem;color:#555;margin-bottom:0.5rem;'>
+                    {weather_data['desc']}
+                </div>
+                <div style='display:grid;grid-template-columns:1fr 1fr;gap:0.4rem;'>
+                    <div style='background:white;border-radius:6px;padding:0.4rem;text-align:center;'>
+                        <div style='font-size:1.4rem;font-weight:800;color:#e53935;'>
+                            {weather_data['temp']} degC
+                        </div>
+                        <div style='font-size:0.7rem;color:#888;'>Temperature</div>
+                    </div>
+                    <div style='background:white;border-radius:6px;padding:0.4rem;text-align:center;'>
+                        <div style='font-size:1.4rem;font-weight:800;color:#1565C0;'>
+                            {weather_data['humidity']}%
+                        </div>
+                        <div style='font-size:0.7rem;color:#888;'>Humidity</div>
+                    </div>
+                    <div style='background:white;border-radius:6px;padding:0.4rem;text-align:center;'>
+                        <div style='font-size:1.4rem;font-weight:800;color:#0288D1;'>
+                            {weather_data['rain']}mm
+                        </div>
+                        <div style='font-size:0.7rem;color:#888;'>Rain (est. weekly)</div>
+                    </div>
+                    <div style='background:white;border-radius:6px;padding:0.4rem;text-align:center;'>
+                        <div style='font-size:1.4rem;font-weight:800;color:#555;'>
+                            {weather_data['wind']} km/h
+                        </div>
+                        <div style='font-size:0.7rem;color:#888;'>Wind Speed</div>
+                    </div>
+                </div>
+                <div style='margin-top:0.6rem;padding:0.4rem 0.6rem;border-radius:6px;
+                            background:{"#fde8e8" if risk=="Extreme" else "#fff3e0" if risk=="High" else "#fff8e1" if risk=="Medium" else "#e8f5e9"};
+                            font-weight:700;font-size:0.85rem;
+                            color:{"#b71c1c" if risk=="Extreme" else "#e65100" if risk=="High" else "#827717" if risk=="Medium" else "#1b5e20"};'>
+                    {risk_emoji} Risk: {risk}{event_txt}
+                </div>
+                <div style='margin-top:0.5rem;font-size:0.75rem;color:#888;'>
+                    Powered by Open-Meteo (free, no API key)
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Auto-fill button for Tool 2
+            if st.button("📋 Auto-fill Tool 2 Week 1 with this weather", use_container_width=True):
+                st.session_state['autofill_weather'] = weather_data
+                st.success("Weather pre-filled! Go to Tool 2 tab.")
+        else:
+            st.info("Click 'Fetch Live Weather' to load current conditions for your city.")
+
+        st.markdown("---")
+        st.markdown("**📡 Data Source**")
+        st.markdown("Open-Meteo API | Free | No API key required | Updates every 30 min")
+
     # Header
     st.markdown("""
     <div class="main-header">
         <h1>🌾 Punjab Smart Agri Ecosystem</h1>
-        <p>AI-powered NPK soil transition planner — Chemical → Organic | IoT-ready | 42-day forecast</p>
+        <p>AI-powered NPK soil transition planner - Chemical -> Organic | IoT-ready | 42-day forecast</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -3455,7 +3589,7 @@ def main():
         df_raw = load_data()
         model, scaler, encoders, df_full, model_metrics = build_model(df_raw)
 
-    st.success(f"✅ Model ready — {len(df_raw):,} records loaded.")
+    st.success(f"✅ Model ready - {len(df_raw):,} records loaded.")
 
     # Model metrics expander
     with st.expander("🤖 Model Performance (RandomForest MultiOutput Regressor)"):
@@ -3465,23 +3599,23 @@ def main():
 
     st.markdown("---")
 
-    # ── Tabs
+    # -- Tabs
     tab1, tab2, tab3, tab4 = st.tabs([
         "📊 Dataset Overview",
-        "🌿 Tool 1 — Ideal 42-Day",
-        "🌦️ Tool 2 — Real-World Weather",
-        "🌱 Tool 3 — Crop Stage",
+        "🌿 Tool 1 - Ideal 42-Day",
+        "🌦️ Tool 2 - Real-World Weather",
+        "🌱 Tool 3 - Crop Stage",
     ])
 
-    # ──────────────────────────────────────────────────────────────────────────
+    # --------------------------------------------------------------------------
     with tab1:
         tab_dataset_overview(df_full)
 
-    # ──────────────────────────────────────────────────────────────────────────
+    # --------------------------------------------------------------------------
     with tab2:
-        st.markdown('<div class="section-title">🌿 Tool 1 — Ideal 42-Day NPK Transition</div>',
+        st.markdown('<div class="section-title">🌿 Tool 1 - Ideal 42-Day NPK Transition</div>',
                     unsafe_allow_html=True)
-        st.info("Best-case scenario — low weather risk, full farmer compliance. "
+        st.info("Best-case scenario - low weather risk, full farmer compliance. "
                 "Shows chemical fertilizer declining and organic input rising over 42 days.")
 
         with st.form("form_tool1"):
@@ -3507,7 +3641,7 @@ def main():
             st.session_state['tool1_crop'] = crop
             st.session_state['tool1_NPK'] = (start_N, start_P, start_K)
 
-            # Summary metrics — Day 1 vs Day 42
+            # Summary metrics - Day 1 vs Day 42
             d1  = report1.iloc[0]
             d42 = report1.iloc[-1]
             m1, m2, m3, m4 = st.columns(4)
@@ -3529,12 +3663,22 @@ def main():
             st.download_button("⬇ Download Report CSV", csv,
                                "tool1_ideal_42day_report.csv", "text/csv")
 
-    # ──────────────────────────────────────────────────────────────────────────
+    # --------------------------------------------------------------------------
     with tab3:
-        st.markdown('<div class="section-title">🌦️ Tool 2 — Real-World 42-Day (Manual Weather)</div>',
+        st.markdown('<div class="section-title">🌦️ Tool 2 - Real-World 42-Day (Manual / Live Weather)</div>',
                     unsafe_allow_html=True)
+
+        # Show autofill notice if available
+        autofill = st.session_state.get('autofill_weather')
+        if autofill:
+            st.success(
+                f"✅ Live weather from **{autofill['city']}** pre-loaded: "
+                f"{autofill['temp']} degC | {autofill['rain']}mm rain | {autofill['humidity']}% humidity. "
+                "Week 1 is auto-filled below."
+            )
+
         st.info("Enter actual or forecast weather for each of the 7 weeks. "
-                "The model adjusts NPK predictions based on heat, rainfall, and humidity stress.")
+                "Use the sidebar to fetch **live weather** and auto-fill Week 1.")
 
         with st.form("form_tool2"):
             c1, c2, c3 = st.columns(3)
@@ -3548,15 +3692,20 @@ def main():
             s_rec   = st.slider("Starting Soil Recovery Score", 20, 80, 35, key='s_rec')
 
             st.markdown("---")
-            st.markdown("**Weekly Weather Input** *(Punjab ranges: Temp 10–50°C | Rain 0–250mm | Humidity 20–95%)*")
+            st.markdown("**Weekly Weather Input** *(Punjab ranges: Temp 10-50 deg C | Rain 0-250mm | Humidity 20-95%)*")
             weekly_weather = []
             for wk in range(1, 8):
                 dc1, dc2, dc3, dc4 = st.columns([1, 2, 2, 2])
-                dc1.markdown(f"**Week {wk}**<br>Days {(wk-1)*6+1}–{min(wk*6,42)}",
+                dc1.markdown(f"**Week {wk}**<br>Days {(wk-1)*6+1}-{min(wk*6,42)}",
                              unsafe_allow_html=True)
-                t = dc2.number_input(f"Temp °C", 10.0, 50.0, 30.0, 1.0, key=f't{wk}')
-                r = dc3.number_input(f"Rain mm", 0.0, 250.0, 50.0, 5.0, key=f'r{wk}')
-                h = dc4.number_input(f"Humidity %", 20.0, 95.0, 60.0, 1.0, key=f'h{wk}')
+                # Week 1: use live weather autofill if available
+                default_t = float(autofill['temp'])   if (autofill and wk == 1) else 30.0
+                default_r = float(autofill['rain'])   if (autofill and wk == 1) else 50.0
+                default_h = float(autofill['humidity']) if (autofill and wk == 1) else 60.0
+
+                t = dc2.number_input("Temp C", 10.0, 50.0, default_t, 1.0, key=f't{wk}')
+                r = dc3.number_input("Rain mm", 0.0, 250.0, default_r, 5.0, key=f'r{wk}')
+                h = dc4.number_input("Humidity %", 20.0, 95.0, default_h, 1.0, key=f'h{wk}')
                 weekly_weather.append((t, r, h))
 
             run2 = st.form_submit_button("▶ Run Real-World Simulation", use_container_width=True)
@@ -3583,8 +3732,8 @@ def main():
                 cls = risk_colors.get(row['Weather_Risk'], 'alert-low')
                 evt = f"  |  ⚠ {row['Extreme_Event']}" if row['Extreme_Event'] != 'None' else ''
                 st.markdown(
-                    f'<div class="alert-box {cls}">Week {int(row["Week"])} — '
-                    f'🌡 {row["Temperature_C"]}°C  🌧 {row["Rainfall_mm"]}mm  '
+                    f'<div class="alert-box {cls}">Week {int(row["Week"])} - '
+                    f'🌡 {row["Temperature_C"]} degC  🌧 {row["Rainfall_mm"]}mm  '
                     f'💧 {row["Humidity_Pct"]}%  |  Risk: <b>{row["Weather_Risk"]}</b>{evt}</div>',
                     unsafe_allow_html=True)
 
@@ -3607,7 +3756,7 @@ def main():
                         mode='lines+markers', line=dict(color=color, width=2.5),
                         marker=dict(size=4), name=col), row=i, col=1)
                 fig.update_layout(height=700, showlegend=False,
-                    title="NPK Prediction — Real-World Weather",
+                    title="NPK Prediction - Real-World Weather",
                     plot_bgcolor='rgba(240,250,240,0.4)')
                 st.plotly_chart(fig, use_container_width=True)
                 st.info("💡 Also run **Tool 1** for the same crop to unlock Graph 2 comparison.")
@@ -3619,9 +3768,9 @@ def main():
             st.download_button("⬇ Download Report CSV", csv2,
                                "tool2_realworld_42day_report.csv", "text/csv")
 
-    # ──────────────────────────────────────────────────────────────────────────
+    # --------------------------------------------------------------------------
     with tab4:
-        st.markdown('<div class="section-title">🌱 Tool 3 — Crop Growth Stage Predictor</div>',
+        st.markdown('<div class="section-title">🌱 Tool 3 - Crop Growth Stage Predictor</div>',
                     unsafe_allow_html=True)
         st.info("Enter your current soil readings to identify the crop's growth stage and health score.")
 
@@ -3651,7 +3800,7 @@ def main():
                     <div class='stage-badge' style='font-size:1.3rem;'>
                         {CROP_ICONS.get(crop3,'🌾')} {result['growth_stage']}
                     </div>
-                    <div style='margin-top:0.8rem;font-size:0.85rem;color:#555;'>Next Stage →</div>
+                    <div style='margin-top:0.8rem;font-size:0.85rem;color:#555;'>Next Stage -></div>
                     <div style='font-weight:600;color:#1a6b2e;'>{result['next_stage']}</div>
                     <hr/>
                     <div style='font-size:0.85rem;color:#555;'>Overall Health Score</div>
@@ -3688,6 +3837,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
