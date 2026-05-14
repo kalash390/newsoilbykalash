@@ -2839,18 +2839,18 @@
 
 # code 4
 
-""
-Punjab Smart Agri Ecosystem — Streamlit Dashboard
-==================================================
-Tools:
-  Tool 1 — Ideal 42-day NPK transition (chemical ↓, organic ↑)
-  Tool 2 — Real-world 42-day NPK with manual weather input
-  Tool 3 — Crop age / growth stage prediction
+# ""
+# Punjab Smart Agri Ecosystem — Streamlit Dashboard
+# ==================================================
+# Tools:
+#   Tool 1 — Ideal 42-day NPK transition (chemical ↓, organic ↑)
+#   Tool 2 — Real-world 42-day NPK with manual weather input
+#   Tool 3 — Crop age / growth stage prediction
 
-Graphs:
-  Graph 1 — NPK comparison: chemical vs organic transition (ideal)
-  Graph 2 — NPK comparison: initial values vs weather-based prediction
-"""
+# Graphs:
+#   Graph 1 — NPK comparison: chemical vs organic transition (ideal)
+#   Graph 2 — NPK comparison: initial values vs weather-based prediction
+# """
 
 import streamlit as st
 import pandas as pd
