@@ -2847,471 +2847,701 @@
 # SOIL SENSE V3 — WEATHER API INTEGRATED
 # FULL ERROR-FREE STREAMLIT APPLICATION
 # ==============================================================================
-
-import streamlit as st
+# PUNJAB SMART AGRI ECOSYSTEM — COMPLETE PYTHON CODE
+# ============================================================================
+# TOOLS:
+#   Tool 1 — Ideal 42-day NPK transition (chemical down, organic up)
+#   Tool 2 — Real-world 42-day NPK with manual/IoT weather input
+#   Tool 3 — Crop age / growth stage prediction
+#
+# GRAPHS:
+#   Graph 1 — NPK comparison: chemical fertilizer vs organic transition (ideal)
+#   Graph 2 — NPK comparison: initial values vs weather-based prediction
+#
+# NOTE: Weather input is MANUAL right now.
+#       Structure is IoT-READY — just replace input() calls with sensor feed.
+#
+# PUNJAB WEATHER RANGES (realistic):
+#   Temperature : 10°C – 50°C (heatwaves can hit 50°C in Punjab)
+#   Rainfall    : 0 mm – 250 mm per week
+#   Humidity    : 20% – 95%
+# ============================================================================
+ 
 import pandas as pd
 import numpy as np
-import requests
-import plotly.graph_objects as go
-
+import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.multioutput import MultiOutputRegressor
-from sklearn.metrics import r2_score
-
-# ==============================================================================
-# PAGE CONFIG
-# ==============================================================================
-
-st.set_page_config(
-    page_title="SOIL SENSE V3",
-    page_icon="🌱",
-    layout="wide"
-)
-
-# ==============================================================================
-# WEATHER API CONFIG
-# ==============================================================================
-
-# GET FREE API:
-# https://openweathermap.org/api
-
-API_KEY = "cb81120197f345ae396cd0fa28c1827c"
-
-# ==============================================================================
-# CUSTOM CSS
-# ==============================================================================
-
-st.markdown("""
-<style>
-
-body {
-    background-color: #081c15;
-}
-
-.metric-box {
-    padding: 20px;
-    border-radius: 12px;
-    background: #1b4332;
-    color: white;
-    text-align: center;
-    margin-bottom: 10px;
-}
-
-</style>
-""", unsafe_allow_html=True)
-
-# ==============================================================================
-# REQUIRED COLUMNS
-# ==============================================================================
-
+from sklearn.metrics import mean_absolute_error, r2_score
+import warnings
+warnings.filterwarnings('ignore')
+ 
+ 
+# ============================================================================
+# STEP 1: LOAD DATA
+# ============================================================================
+ 
+def load_data(filepath):
+    df = pd.read_excel(filepath)
+    print(f"Dataset loaded: {df.shape[0]} rows, {df.shape[1]} columns")
+    print(f"Farmers  : {df['Farmer_ID'].nunique()}")
+    print(f"Crops    : {list(df['Crop_Name'].unique())}")
+    print(f"Weeks    : {df['Week_Number'].min()} to {df['Week_Number'].max()}")
+    return df
+ 
+ 
+# ============================================================================
+# STEP 2: PREPROCESS
+# ============================================================================
+ 
+def preprocess(df):
+    df = df.copy()
+    df = df.sort_values(['Farmer_ID', 'Week_Number']).reset_index(drop=True)
+    df['Extreme_Event_Flag'] = df['Extreme_Event_Flag'].fillna('None')
+ 
+    encoders = {}
+    for col in ['Crop_Name', 'Weather_Risk_Level',
+                'Farmer_Action_Compliance', 'Farmer_Archetype', 'Extreme_Event_Flag']:
+        le = LabelEncoder()
+        df[col + '_Enc'] = le.fit_transform(df[col])
+        encoders[col] = le
+ 
+    for nutrient in ['Current_Soil_Nitrogen_kg_per_ha',
+                     'Current_Soil_Phosphorus_kg_per_ha',
+                     'Current_Soil_Potassium_kg_per_ha',
+                     'Soil_Recovery_Score']:
+        df[nutrient + '_Change'] = df.groupby('Farmer_ID')[nutrient].diff()
+ 
+    df['OrganicMatter_Change'] = df.groupby('Farmer_ID')[
+        'Current_Soil_Organic_Matter_Percent'].diff()
+    df['Organic_Ratio'] = df.groupby('Farmer_ID')[
+        'Current_Soil_Organic_Matter_Percent'].transform(
+        lambda x: (x - x.iloc[0]) / (x.iloc[0] + 1e-6) * 100)
+ 
+    df_model = df.dropna(subset=[
+        'Current_Soil_Nitrogen_kg_per_ha_Change',
+        'Current_Soil_Phosphorus_kg_per_ha_Change',
+        'Current_Soil_Potassium_kg_per_ha_Change',
+        'Soil_Recovery_Score_Change'
+    ]).copy()
+ 
+    return df, df_model, encoders
+ 
+ 
+# ============================================================================
+# STEP 3: FEATURES & TARGETS
+# ============================================================================
+ 
 FEATURE_COLS = [
-    'Current_Temp',
-    'Current_Rain',
-    'Current_Hum',
-    'Current_Soil_pH',
-    'Current_Soil_Organic_Matter_Percent',
+    'Current_Temp', 'Current_Rain', 'Current_Hum',
+    'Current_Soil_pH', 'Current_Soil_Organic_Matter_Percent',
     'Current_Soil_Nitrogen_kg_per_ha',
     'Current_Soil_Phosphorus_kg_per_ha',
     'Current_Soil_Potassium_kg_per_ha',
-    'Soil_Recovery_Score',
-    'Week_Number',
-    'Crop_Name_Enc',
-    'Weather_Risk_Level_Enc',
-    'Farmer_Action_Compliance_Enc',
-    'Extreme_Event_Flag_Enc'
+    'Soil_Recovery_Score', 'Week_Number',
+    'Crop_Name_Enc', 'Weather_Risk_Level_Enc',
+    'Farmer_Action_Compliance_Enc', 'Extreme_Event_Flag_Enc',
 ]
-
+ 
 TARGET_COLS = [
-    'N_Change',
-    'P_Change',
-    'K_Change',
-    'Recovery_Change'
+    'Current_Soil_Nitrogen_kg_per_ha_Change',
+    'Current_Soil_Phosphorus_kg_per_ha_Change',
+    'Current_Soil_Potassium_kg_per_ha_Change',
+    'Soil_Recovery_Score_Change',
 ]
-
-# ==============================================================================
-# WEATHER API FUNCTION
-# ==============================================================================
-
-def get_weather(city):
-
-    try:
-
-        url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={API_KEY}&units=metric"
-
-        response = requests.get(url)
-
-        data = response.json()
-
-        temp = data['main']['temp']
-        humidity = data['main']['humidity']
-        rain = data.get('rain', {}).get('1h', 0)
-
-        return {
-            "temp": temp,
-            "humidity": humidity,
-            "rain": rain,
-            "status": data['weather'][0]['description']
-        }
-
-    except:
-        return None
-
-# ==============================================================================
-# LOAD DATA
-# ==============================================================================
-
-def load_data(uploaded_file):
-
-    if uploaded_file.name.endswith(".csv"):
-        return pd.read_csv(uploaded_file)
-
-    return pd.read_excel(uploaded_file)
-
-# ==============================================================================
-# PREPROCESS
-# ==============================================================================
-
-def preprocess(df):
-
-    df = df.copy()
-
-    df['Extreme_Event_Flag'] = df['Extreme_Event_Flag'].fillna("None")
-
-    encoders = {}
-
-    categorical_cols = [
-        'Crop_Name',
-        'Weather_Risk_Level',
-        'Farmer_Action_Compliance',
-        'Extreme_Event_Flag'
-    ]
-
-    for col in categorical_cols:
-
-        le = LabelEncoder()
-
-        df[col + "_Enc"] = le.fit_transform(df[col].astype(str))
-
-        encoders[col] = le
-
-    df['N_Change'] = df.groupby('Farmer_ID')['Current_Soil_Nitrogen_kg_per_ha'].diff()
-
-    df['P_Change'] = df.groupby('Farmer_ID')['Current_Soil_Phosphorus_kg_per_ha'].diff()
-
-    df['K_Change'] = df.groupby('Farmer_ID')['Current_Soil_Potassium_kg_per_ha'].diff()
-
-    df['Recovery_Change'] = df.groupby('Farmer_ID')['Soil_Recovery_Score'].diff()
-
-    df = df.dropna()
-
-    return df, encoders
-
-# ==============================================================================
-# TRAIN MODEL
-# ==============================================================================
-
-def train_model(df):
-
-    X = df[FEATURE_COLS]
-
-    y = df[TARGET_COLS]
-
+ 
+ 
+# ============================================================================
+# STEP 4: TRAIN MODEL
+# ============================================================================
+ 
+def train_model(df_model):
+    X = df_model[FEATURE_COLS]
+    y = df_model[TARGET_COLS]
+ 
     X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=0.2,
-        random_state=42
-    )
-
+        X, y, test_size=0.2, random_state=42)
+ 
     scaler = StandardScaler()
-
-    X_train = scaler.fit_transform(X_train)
-
-    X_test = scaler.transform(X_test)
-
+    X_train_sc = scaler.fit_transform(X_train)
+    X_test_sc  = scaler.transform(X_test)
+ 
     model = MultiOutputRegressor(
-        RandomForestRegressor(
-            n_estimators=200,
-            random_state=42
-        )
+        RandomForestRegressor(n_estimators=200, max_depth=10,
+                              random_state=42, n_jobs=-1)
     )
-
-    model.fit(X_train, y_train)
-
-    preds = model.predict(X_test)
-
-    score = r2_score(y_test, preds)
-
-    return model, scaler, score
-
-# ==============================================================================
-# WEATHER RISK
-# ==============================================================================
-
+    model.fit(X_train_sc, y_train)
+    y_pred = model.predict(X_test_sc)
+ 
+    print("\n=== MODEL PERFORMANCE ===")
+    names = ['Nitrogen Δ', 'Phosphorus Δ', 'Potassium Δ', 'Recovery Δ']
+    for i, name in enumerate(names):
+        mae = mean_absolute_error(y_test.iloc[:, i], y_pred[:, i])
+        r2  = r2_score(y_test.iloc[:, i], y_pred[:, i])
+        print(f"  {name:15s}: MAE={mae:.3f},  R²={r2:.3f}")
+ 
+    return model, scaler
+ 
+ 
+# ============================================================================
+# HELPER: Classify weather risk from raw values (Punjab-specific)
+# ============================================================================
+ 
 def classify_weather(temp, rain, humidity):
-
+    """
+    Punjab realistic ranges:
+      Temperature : 10 – 50°C  (heatwaves up to 50°C)
+      Rainfall    : 0  – 250 mm/week
+      Humidity    : 20 – 95%
+    """
+    extreme_event = 'None'
+ 
     if temp >= 45:
-        return "Extreme"
-
-    elif temp >= 38 or rain >= 180:
-        return "High"
-
-    elif temp >= 32 or humidity >= 85:
-        return "Medium"
-
+        risk = 'Extreme'
+        extreme_event = 'Heatwave'
+    elif temp >= 40 or rain >= 180:
+        risk = 'High'
+        if rain >= 180:
+            extreme_event = 'Flood'
+    elif temp >= 34 or rain < 15 or humidity > 85:
+        risk = 'Medium'
+        if rain < 15:
+            extreme_event = 'Drought'
     else:
-        return "Low"
-
-# ==============================================================================
-# SIDEBAR
-# ==============================================================================
-
-st.sidebar.title("🌱 SOIL SENSE V3")
-
-page = st.sidebar.radio(
-    "Navigation",
-    [
-        "Dashboard",
-        "Train AI Model",
-        "Weather Monitoring",
-        "Manual Prediction"
-    ]
-)
-
-# ==============================================================================
-# DASHBOARD
-# ==============================================================================
-
-if page == "Dashboard":
-
-    st.title("🌱 SOIL SENSE V3")
-
-    st.info("AI Soil Recovery Intelligence Platform")
-
-    st.markdown("""
-    ### Features
-
-    ✅ AI Soil Prediction  
-    ✅ Weather API Integration  
-    ✅ NPK Monitoring  
-    ✅ Soil Recovery Score  
-    ✅ Crop Risk Analysis  
-    ✅ Streamlit Dashboard  
-    """)
-
-# ==============================================================================
-# TRAIN MODEL PAGE
-# ==============================================================================
-
-elif page == "Train AI Model":
-
-    st.title("🤖 Train AI Model")
-
-    uploaded_file = st.file_uploader(
-        "Upload Dataset",
-        type=['csv', 'xlsx']
-    )
-
-    if uploaded_file is not None:
-
-        try:
-
-            df = load_data(uploaded_file)
-
-            st.success("Dataset Loaded Successfully")
-
-            st.dataframe(df.head())
-
-            if st.button("Train Model"):
-
-                with st.spinner("Training AI Model..."):
-
-                    processed_df, encoders = preprocess(df)
-
-                    model, scaler, score = train_model(processed_df)
-
-                    st.session_state['model'] = model
-                    st.session_state['scaler'] = scaler
-                    st.session_state['encoders'] = encoders
-
-                    st.success("Model Trained Successfully")
-
-                    st.metric("R² Score", round(score, 3))
-
-        except Exception as e:
-
-            st.error(f"Error: {e}")
-
-# ==============================================================================
-# WEATHER MONITORING
-# ==============================================================================
-
-elif page == "Weather Monitoring":
-
-    st.title("📡 Live Weather Monitoring")
-
-    city = st.text_input("Enter City", "Gorakhpur")
-
-    if st.button("Get Weather"):
-
-        weather = get_weather(city)
-
-        if weather:
-
-            c1, c2, c3, c4 = st.columns(4)
-
-            with c1:
-                st.metric("Temperature", f"{weather['temp']} °C")
-
-            with c2:
-                st.metric("Humidity", f"{weather['humidity']} %")
-
-            with c3:
-                st.metric("Rainfall", f"{weather['rain']} mm")
-
-            with c4:
-                st.metric("Condition", weather['status'])
-
-            risk = classify_weather(
-                weather['temp'],
-                weather['rain'],
-                weather['humidity']
-            )
-
-            if risk == "Low":
-                st.success(f"Weather Risk: {risk}")
-
-            elif risk == "Medium":
-                st.warning(f"Weather Risk: {risk}")
-
-            else:
-                st.error(f"Weather Risk: {risk}")
-
+        risk = 'Low'
+ 
+    return risk, extreme_event
+ 
+ 
+# ============================================================================
+# HELPER: IoT-ready weather input
+# Replace the input() lines below with your IoT sensor feed later.
+# ============================================================================
+ 
+def get_weather_input(week, day_start, day_end, iot_mode=False, iot_data=None):
+    """
+    Manual input now. IoT-ready: set iot_mode=True and pass iot_data dict.
+    iot_data = {'temp': 35.0, 'rain': 80.0, 'humidity': 65.0}
+    """
+    if iot_mode and iot_data:
+        temp     = iot_data['temp']
+        rain     = iot_data['rain']
+        humidity = iot_data['humidity']
+        print(f"  [IoT] Temp={temp}°C, Rain={rain}mm, Humidity={humidity}%")
+    else:
+        print(f"\n  Week {week} weather (Days {day_start}–{day_end}):")
+        print("  [Manual input — will be replaced by IoT sensor later]")
+        temp     = float(input("    Temperature (°C)  [Punjab range: 10–50]: "))
+        rain     = float(input("    Rainfall    (mm)  [Punjab range: 0–250]: "))
+        humidity = float(input("    Humidity    (%)   [Punjab range: 20–95]: "))
+ 
+    # Clamp to realistic Punjab bounds
+    temp     = np.clip(temp,     10,  50)
+    rain     = np.clip(rain,      0, 250)
+    humidity = np.clip(humidity, 20,  95)
+ 
+    return temp, rain, humidity
+ 
+ 
+# ============================================================================
+# TOOL 1: IDEAL 42-DAY NPK TRANSITION
+# ============================================================================
+# Best case — no extreme weather, full compliance.
+# Shows chemical fertilizer going DOWN, organic going UP.
+# Returns daily data for Graph 1.
+# ============================================================================
+ 
+def tool1_ideal_42day(model, scaler, df, encoders, crop_name,
+                      start_N, start_P, start_K,
+                      start_pH=7.3, start_organic=0.65, start_recovery=35.0):
+ 
+    ideal_temp     = df[df['Weather_Risk_Level'] == 'Low']['Current_Temp'].mean()
+    ideal_rain     = df[df['Weather_Risk_Level'] == 'Low']['Current_Rain'].mean()
+    ideal_humidity = df[df['Weather_Risk_Level'] == 'Low']['Current_Hum'].mean()
+ 
+    crop_enc    = encoders['Crop_Name'].transform([crop_name])[0]
+    risk_enc    = encoders['Weather_Risk_Level'].transform(['Low'])[0]
+    comply_enc  = encoders['Farmer_Action_Compliance'].transform(['Full'])[0]
+    event_enc   = encoders['Extreme_Event_Flag'].transform(['None'])[0]
+ 
+    N, P, K = start_N, start_P, start_K
+    pH, org, rec = start_pH, start_organic, start_recovery
+ 
+    results = []
+ 
+    print(f"\n{'='*60}")
+    print(f"  TOOL 1 — IDEAL 42-DAY NPK TRANSITION  ({crop_name})")
+    print(f"{'='*60}")
+    print(f"  Starting N={N}, P={P}, K={K}, Recovery={rec}")
+    print(f"  Conditions: Ideal weather (no extreme events)\n")
+    print(f"  {'Day':>4} | {'N (kg/ha)':>10} | {'P (kg/ha)':>8} | "
+          f"{'K (kg/ha)':>9} | {'Recovery':>9} | {'Organic%':>9} | {'Chemical%':>10}")
+    print(f"  {'-'*72}")
+ 
+    for week in range(1, 8):
+        X_row = pd.DataFrame([[
+            ideal_temp, ideal_rain, ideal_humidity,
+            pH, org, N, P, K, rec, week,
+            crop_enc, risk_enc, comply_enc, event_enc
+        ]], columns=FEATURE_COLS)
+ 
+        deltas = model.predict(scaler.transform(X_row))[0]
+        dN   = np.clip(deltas[0], -60,  5)
+        dP   = np.clip(deltas[1],  -2,  3)
+        dK   = np.clip(deltas[2],  -1,  5)
+        dRec = np.clip(deltas[3],  -3, 20)
+ 
+        org_gain      = 0.08
+        org           = min(org + org_gain, 3.0)
+        organic_pct   = min((week / 7) * 40, 40)
+        chemical_pct  = 100 - organic_pct
+ 
+        week_days = []
+        for d in range(6):
+            actual_day = (week - 1) * 6 + d + 1
+            if actual_day > 42:
+                break
+            frac  = (d + 1) / 6.0
+            day_N = np.clip(N + dN * frac, 50,  600)
+            day_P = np.clip(P + dP * frac,  5,   60)
+            day_K = np.clip(K + dK * frac, 80,  400)
+            day_r = np.clip(rec + dRec * frac, 25, 100)
+ 
+            row = {
+                'Day': actual_day, 'Week': week,
+                'Nitrogen_kg_ha'    : round(day_N, 2),
+                'Phosphorus_kg_ha'  : round(day_P, 2),
+                'Potassium_kg_ha'   : round(day_K, 2),
+                'Soil_Recovery_Score': round(day_r, 2),
+                'Organic_Input_Pct' : round(organic_pct, 1),
+                'Chemical_Input_Pct': round(chemical_pct, 1),
+                'Crop': crop_name,
+            }
+            results.append(row)
+            week_days.append(row)
+            print(f"  {actual_day:>4} | {day_N:>10.2f} | {day_P:>8.2f} | "
+                  f"{day_K:>9.2f} | {day_r:>9.2f} | "
+                  f"{organic_pct:>8.1f}% | {chemical_pct:>9.1f}%")
+ 
+        # Weekly summary
+        last = week_days[-1]
+        print(f"\n  ── WEEK {week} SUMMARY ─────────────────────────────────")
+        print(f"     N end={last['Nitrogen_kg_ha']}  P end={last['Phosphorus_kg_ha']}  "
+              f"K end={last['Potassium_kg_ha']}  Recovery={last['Soil_Recovery_Score']}")
+        print(f"     Organic input reached {organic_pct:.1f}%  |  "
+              f"Chemical reduced to {chemical_pct:.1f}%\n")
+ 
+        N   = np.clip(N + dN,   50,  600)
+        P   = np.clip(P + dP,    5,   60)
+        K   = np.clip(K + dK,   80,  400)
+        rec = np.clip(rec + dRec, 25, 100)
+ 
+    return pd.DataFrame(results)
+ 
+ 
+# ============================================================================
+# TOOL 2: REAL-WORLD 42-DAY WITH MANUAL / IoT WEATHER INPUT
+# ============================================================================
+# Farmer (or IoT sensor) enters weather every 7 days.
+# We predict NPK + Soil Recovery for each day in that block.
+# Returns daily data for Graph 2.
+# ============================================================================
+ 
+def tool2_realworld_42day(model, scaler, encoders, crop_name,
+                          start_N, start_P, start_K,
+                          start_pH=7.3, start_organic=0.65, start_recovery=35.0,
+                          iot_mode=False, iot_weekly_data=None):
+ 
+    crop_enc = encoders['Crop_Name'].transform([crop_name])[0]
+    N, P, K  = start_N, start_P, start_K
+    pH, org, rec = start_pH, start_organic, start_recovery
+ 
+    all_results = []
+ 
+    print(f"\n{'='*60}")
+    print(f"  TOOL 2 — REAL-WORLD 42-DAY NPK  ({crop_name})")
+    print(f"{'='*60}")
+    print(f"  Starting N={N}, P={P}, K={K}, Recovery={rec}")
+    print(f"  Mode: {'IoT Sensor' if iot_mode else 'Manual Input'}\n")
+ 
+    for week in range(1, 8):
+        day_start = (week - 1) * 6 + 1
+        day_end   = min(week * 6, 42)
+ 
+        # Get weather
+        iot_data = iot_weekly_data[week - 1] if (iot_mode and iot_weekly_data) else None
+        temp, rain, humidity = get_weather_input(
+            week, day_start, day_end, iot_mode=iot_mode, iot_data=iot_data)
+ 
+        risk, event = classify_weather(temp, rain, humidity)
+ 
+        known_risks  = list(encoders['Weather_Risk_Level'].classes_)
+        known_events = list(encoders['Extreme_Event_Flag'].classes_)
+        risk_enc  = encoders['Weather_Risk_Level'].transform(
+            [risk  if risk  in known_risks  else 'High'])[0]
+        event_enc = encoders['Extreme_Event_Flag'].transform(
+            [event if event in known_events else 'None'])[0]
+        comply_enc = encoders['Farmer_Action_Compliance'].transform(['Full'])[0]
+ 
+        print(f"  → Risk: {risk}"
+              + (f"  |  Extreme event: {event}" if event != 'None' else ""))
+ 
+        X_row = pd.DataFrame([[
+            temp, rain, humidity,
+            pH, org, N, P, K, rec, week,
+            crop_enc, risk_enc, comply_enc, event_enc
+        ]], columns=FEATURE_COLS)
+ 
+        deltas = model.predict(scaler.transform(X_row))[0]
+ 
+        # Punjab heatwave effect: sharper NPK drop, recovery stalls
+        if temp >= 45:
+            dN   = np.clip(deltas[0] * 1.4, -100, 0)
+            dP   = np.clip(deltas[1] * 1.2,  -5,  1)
+            dK   = np.clip(deltas[2] * 1.2,  -5,  2)
+            dRec = np.clip(deltas[3] * 0.3, -15,  5)
+        elif risk == 'High':
+            dN   = np.clip(deltas[0] * 1.2, -80, 2)
+            dP   = np.clip(deltas[1],        -3,  2)
+            dK   = np.clip(deltas[2],        -3,  3)
+            dRec = np.clip(deltas[3] * 0.5, -10,  8)
+        elif risk == 'Medium':
+            dN   = np.clip(deltas[0],        -60, 3)
+            dP   = np.clip(deltas[1],         -2, 2)
+            dK   = np.clip(deltas[2],         -2, 4)
+            dRec = np.clip(deltas[3],         -5, 12)
         else:
-            st.error("Weather API Error")
-
-# ==============================================================================
-# MANUAL PREDICTION
-# ==============================================================================
-
-elif page == "Manual Prediction":
-
-    st.title("👨‍🌾 Manual Soil Prediction")
-
-    if 'model' not in st.session_state:
-
-        st.warning("Please train model first")
-
+            dN   = np.clip(deltas[0], -60,  5)
+            dP   = np.clip(deltas[1],  -2,  3)
+            dK   = np.clip(deltas[2],  -1,  5)
+            dRec = np.clip(deltas[3],  -3, 20)
+ 
+        # Organic matter grows slower in bad weather
+        org_gain = 0.04 if risk in ['Extreme', 'High'] else 0.08
+        org = min(org + org_gain, 3.0)
+ 
+        base_organic  = (week / 7) * 40
+        organic_pct   = base_organic * (0.4 if risk == 'Extreme'
+                         else 0.7 if risk == 'High' else 1.0)
+        chemical_pct  = 100 - organic_pct
+ 
+        print(f"\n  {'Day':>4} | {'N (kg/ha)':>10} | {'P (kg/ha)':>8} | "
+              f"{'K (kg/ha)':>9} | {'Recovery':>9} | {'Organic%':>9} | {'Chemical%':>10}")
+        print(f"  {'-'*72}")
+ 
+        week_days = []
+        for d in range(6):
+            actual_day = (week - 1) * 6 + d + 1
+            if actual_day > 42:
+                break
+            frac  = (d + 1) / 6.0
+            day_N = np.clip(N + dN * frac, 50,  600)
+            day_P = np.clip(P + dP * frac,  5,   60)
+            day_K = np.clip(K + dK * frac, 80,  400)
+            day_r = np.clip(rec + dRec * frac, 25, 100)
+ 
+            row = {
+                'Day': actual_day, 'Week': week,
+                'Temperature_C'     : temp,
+                'Rainfall_mm'       : rain,
+                'Humidity_Pct'      : humidity,
+                'Weather_Risk'      : risk,
+                'Extreme_Event'     : event,
+                'Nitrogen_kg_ha'    : round(day_N, 2),
+                'Phosphorus_kg_ha'  : round(day_P, 2),
+                'Potassium_kg_ha'   : round(day_K, 2),
+                'Soil_Recovery_Score': round(day_r, 2),
+                'Organic_Input_Pct' : round(organic_pct, 1),
+                'Chemical_Input_Pct': round(chemical_pct, 1),
+                'Crop': crop_name,
+            }
+            all_results.append(row)
+            week_days.append(row)
+ 
+            print(f"  {actual_day:>4} | {day_N:>10.2f} | {day_P:>8.2f} | "
+                  f"{day_K:>9.2f} | {day_r:>9.2f} | "
+                  f"{organic_pct:>8.1f}% | {chemical_pct:>9.1f}%")
+ 
+        # Weekly summary
+        last = week_days[-1]
+        print(f"\n  ── WEEK {week} SUMMARY ─────────────────────────────────")
+        print(f"     Temp={temp}°C  Rain={rain}mm  Humidity={humidity}%  "
+              f"Risk={risk}  Event={event}")
+        print(f"     N={last['Nitrogen_kg_ha']}  P={last['Phosphorus_kg_ha']}  "
+              f"K={last['Potassium_kg_ha']}  Recovery={last['Soil_Recovery_Score']}")
+        print(f"     Organic={organic_pct:.1f}%  Chemical={chemical_pct:.1f}%\n")
+ 
+        N   = np.clip(N + dN,   50,  600)
+        P   = np.clip(P + dP,    5,   60)
+        K   = np.clip(K + dK,   80,  400)
+        rec = np.clip(rec + dRec, 25, 100)
+ 
+    return pd.DataFrame(all_results)
+ 
+ 
+# ============================================================================
+# TOOL 3: CROP GROWTH STAGE PREDICTION
+# ============================================================================
+ 
+GROWTH_STAGES = {
+    'Wheat'  : ['Germination','Tillering','Jointing','Heading','Grain Fill','Maturity','Harvest'],
+    'Rice'   : ['Germination','Seedling','Tillering','Panicle','Flowering','Grain Fill','Maturity'],
+    'Cotton' : ['Germination','Seedling','Squaring','Flowering','Boll Set','Boll Open','Harvest'],
+    'Mustard': ['Germination','Rosette','Bolting','Flowering','Pod Fill','Ripening','Harvest'],
+    'Gram'   : ['Germination','Seedling','Branching','Flowering','Pod Fill','Maturity','Harvest'],
+}
+ 
+def tool3_crop_age_prediction(df, crop_name, current_N, current_P, current_K,
+                               current_recovery, current_week):
+    stages      = GROWTH_STAGES.get(crop_name, GROWTH_STAGES['Wheat'])
+    stage_index = min(current_week - 1, len(stages) - 1)
+    current_stage = stages[stage_index]
+    next_stage    = stages[min(stage_index + 1, len(stages) - 1)]
+ 
+    crop_df  = df[df['Crop_Name'] == crop_name]
+    week_df  = crop_df[crop_df['Week_Number'] == current_week]
+    if len(week_df) == 0:
+        week_df = crop_df
+ 
+    avg_N   = week_df['Current_Soil_Nitrogen_kg_per_ha'].mean()
+    avg_P   = week_df['Current_Soil_Phosphorus_kg_per_ha'].mean()
+    avg_K   = week_df['Current_Soil_Potassium_kg_per_ha'].mean()
+    avg_rec = week_df['Soil_Recovery_Score'].mean()
+ 
+    n_h = min(current_N   / avg_N,   1.0) * 100 if avg_N   > 0 else 50
+    p_h = min(current_P   / avg_P,   1.0) * 100 if avg_P   > 0 else 50
+    k_h = min(current_K   / avg_K,   1.0) * 100 if avg_K   > 0 else 50
+    r_h = min(current_recovery / avg_rec, 1.0) * 100 if avg_rec > 0 else 50
+    overall = round((n_h + p_h + k_h + r_h) / 4, 1)
+ 
+    if overall >= 80:
+        advice = "Excellent. Continue organic transition as planned."
+    elif overall >= 60:
+        advice = "Good. Monitor NPK closely in next 7 days."
+    elif overall >= 40:
+        advice = "Moderate stress. Consider slowing organic transition rate."
     else:
-
-        crop = st.selectbox(
-            "Crop",
-            ['Wheat', 'Rice', 'Cotton']
-        )
-
-        N = st.number_input("Nitrogen", 50.0, 600.0, 300.0)
-
-        P = st.number_input("Phosphorus", 5.0, 60.0, 20.0)
-
-        K = st.number_input("Potassium", 80.0, 400.0, 200.0)
-
-        pH = st.slider("Soil pH", 4.0, 9.0, 7.0)
-
-        organic = st.slider("Organic Matter", 0.1, 5.0, 1.0)
-
-        recovery = st.slider("Recovery Score", 25, 100, 40)
-
-        city = st.text_input("Weather City", "Gorakhpur")
-
-        if st.button("Predict"):
-
-            weather = get_weather(city)
-
-            if weather is None:
-
-                st.error("Weather API Failed")
-
-            else:
-
-                risk = classify_weather(
-                    weather['temp'],
-                    weather['rain'],
-                    weather['humidity']
-                )
-
-                encoders = st.session_state['encoders']
-
-                crop_enc = encoders['Crop_Name'].transform([crop])[0]
-
-                risk_enc = encoders['Weather_Risk_Level'].transform([risk])[0]
-
-                compliance_enc = encoders[
-                    'Farmer_Action_Compliance'
-                ].transform(['Full'])[0]
-
-                event_enc = encoders[
-                    'Extreme_Event_Flag'
-                ].transform(['None'])[0]
-
-                X = pd.DataFrame([[
-                    weather['temp'],
-                    weather['rain'],
-                    weather['humidity'],
-                    pH,
-                    organic,
-                    N,
-                    P,
-                    K,
-                    recovery,
-                    1,
-                    crop_enc,
-                    risk_enc,
-                    compliance_enc,
-                    event_enc
-                ]], columns=FEATURE_COLS)
-
-                scaler = st.session_state['scaler']
-
-                model = st.session_state['model']
-
-                pred = model.predict(
-                    scaler.transform(X)
-                )[0]
-
-                st.success("Prediction Completed")
-
-                c1, c2, c3, c4 = st.columns(4)
-
-                with c1:
-                    st.metric("N Change", round(pred[0], 2))
-
-                with c2:
-                    st.metric("P Change", round(pred[1], 2))
-
-                with c3:
-                    st.metric("K Change", round(pred[2], 2))
-
-                with c4:
-                    st.metric("Recovery Change", round(pred[3], 2))
-
-                future_recovery = recovery + pred[3]
-
-                fig = go.Figure()
-
-                fig.add_trace(go.Indicator(
-                    mode="gauge+number",
-                    value=future_recovery,
-                    title={'text': "Future Recovery Score"},
-                    gauge={
-                        'axis': {'range': [0, 100]},
-                        'bar': {'color': "green"}
-                    }
-                ))
-
-                st.plotly_chart(fig, use_container_width=True)
-
-# ==============================================================================
-# END
-# ==============================================================================
+        advice = "High stress. Pause organic transition. Focus on soil recovery first."
+ 
+    print(f"\n{'='*60}")
+    print(f"  TOOL 3 — CROP GROWTH STAGE PREDICTION")
+    print(f"{'='*60}")
+    print(f"  Crop             : {crop_name}")
+    print(f"  Current Week     : {current_week}  (~Day {(current_week-1)*6})")
+    print(f"  Growth Stage     : {current_stage}")
+    print(f"  Next Stage       : {next_stage}")
+    print(f"  N Health         : {n_h:.1f}%  (Yours={current_N:.1f}, Avg={avg_N:.1f})")
+    print(f"  P Health         : {p_h:.1f}%  (Yours={current_P:.1f}, Avg={avg_P:.1f})")
+    print(f"  K Health         : {k_h:.1f}%  (Yours={current_K:.1f}, Avg={avg_K:.1f})")
+    print(f"  Recovery Health  : {r_h:.1f}%  (Yours={current_recovery:.1f}, Avg={avg_rec:.1f})")
+    print(f"  Overall Health   : {overall}%")
+    print(f"  Recommendation   : {advice}")
+ 
+    return {
+        'crop': crop_name, 'week': current_week,
+        'growth_stage': current_stage, 'next_stage': next_stage,
+        'n_health': round(n_h,1), 'p_health': round(p_h,1),
+        'k_health': round(k_h,1), 'recovery_health': round(r_h,1),
+        'overall_health': overall, 'recommendation': advice,
+    }
+ 
+ 
+# ============================================================================
+# GRAPH 1: NPK — CHEMICAL vs ORGANIC TRANSITION (IDEAL)
+# ============================================================================
+ 
+def plot_graph1(report_tool1, crop_name):
+    """
+    Shows N, P, K lines over 42 days.
+    Also shows chemical % going DOWN and organic % going UP.
+    """
+    df = report_tool1
+    days = df['Day']
+ 
+    fig, axes = plt.subplots(2, 1, figsize=(14, 10))
+    fig.suptitle(f'GRAPH 1 — NPK Transition: Chemical → Organic  |  {crop_name}  |  Ideal Conditions',
+                 fontsize=14, fontweight='bold', y=0.98)
+ 
+    # Top chart: NPK values
+    ax1 = axes[0]
+    ax1.plot(days, df['Nitrogen_kg_ha'],   color='#2196F3', linewidth=2.5,
+             label='Nitrogen (N) kg/ha',   marker='o', markersize=3)
+    ax1.plot(days, df['Phosphorus_kg_ha'], color='#FF9800', linewidth=2.5,
+             label='Phosphorus (P) kg/ha', marker='s', markersize=3)
+    ax1.plot(days, df['Potassium_kg_ha'],  color='#4CAF50', linewidth=2.5,
+             label='Potassium (K) kg/ha',  marker='^', markersize=3)
+ 
+    # Week separators
+    for w in range(1, 7):
+        ax1.axvline(x=w*6 + 0.5, color='gray', linestyle='--', alpha=0.4)
+        ax1.text(w*6 + 0.7, ax1.get_ylim()[1] if ax1.get_ylim()[1] > 0 else 400,
+                 f'W{w+1}', fontsize=8, color='gray')
+ 
+    ax1.set_xlabel('Day')
+    ax1.set_ylabel('NPK Level (kg/ha)')
+    ax1.set_title('NPK Soil Levels Over 42 Days (Chemical Declining, Organic Supplementing)')
+    ax1.legend(loc='upper right')
+    ax1.grid(alpha=0.3)
+    ax1.set_xlim(1, 42)
+ 
+    # Bottom chart: Chemical vs Organic ratio
+    ax2 = axes[1]
+    ax2.fill_between(days, df['Chemical_Input_Pct'], alpha=0.6,
+                     color='#F44336', label='Chemical Input %')
+    ax2.fill_between(days, df['Organic_Input_Pct'], alpha=0.6,
+                     color='#4CAF50', label='Organic Input %')
+    ax2.plot(days, df['Chemical_Input_Pct'], color='#F44336', linewidth=2)
+    ax2.plot(days, df['Organic_Input_Pct'],  color='#4CAF50', linewidth=2)
+    ax2.set_xlabel('Day')
+    ax2.set_ylabel('Input Share (%)')
+    ax2.set_title('Chemical Fertilizer Going DOWN  ↓  |  Organic Input Going UP  ↑')
+    ax2.legend(loc='center right')
+    ax2.grid(alpha=0.3)
+    ax2.set_xlim(1, 42)
+    ax2.set_ylim(0, 110)
+ 
+    plt.tight_layout()
+    plt.savefig('graph1_npk_ideal_transition.png', dpi=150, bbox_inches='tight')
+    print("\nGraph 1 saved: graph1_npk_ideal_transition.png")
+    plt.show()
+ 
+ 
+# ============================================================================
+# GRAPH 2: NPK — INITIAL VALUES vs WEATHER-BASED PREDICTION
+# ============================================================================
+ 
+def plot_graph2(report_tool1, report_tool2, crop_name,
+                start_N, start_P, start_K):
+    """
+    Compares:
+      - Flat initial NPK values (what farmer started with)
+      - Predicted NPK based on actual weather inputs (Tool 2)
+      - Ideal NPK from Tool 1 (reference)
+    """
+    days_t1 = report_tool1['Day']
+    days_t2 = report_tool2['Day']
+ 
+    fig, axes = plt.subplots(3, 1, figsize=(14, 13))
+    fig.suptitle(f'GRAPH 2 — NPK Comparison: Initial Values vs Weather-Based Prediction  |  {crop_name}',
+                 fontsize=13, fontweight='bold', y=0.99)
+ 
+    nutrients = [
+        ('Nitrogen_kg_ha',   'Nitrogen (N)',   start_N, '#2196F3'),
+        ('Phosphorus_kg_ha', 'Phosphorus (P)', start_P, '#FF9800'),
+        ('Potassium_kg_ha',  'Potassium (K)',  start_K, '#4CAF50'),
+    ]
+ 
+    for ax, (col, label, start_val, color) in zip(axes, nutrients):
+        # Initial flat line
+        ax.axhline(y=start_val, color='gray', linewidth=1.8,
+                   linestyle='--', label=f'Initial {label}: {start_val} kg/ha')
+ 
+        # Ideal prediction (Tool 1)
+        ax.plot(days_t1, report_tool1[col], color=color, linewidth=2,
+                linestyle='-', label='Ideal (no extreme weather)', alpha=0.6)
+ 
+        # Real-world prediction (Tool 2)
+        ax.plot(days_t2, report_tool2[col], color=color, linewidth=2.5,
+                linestyle='-', marker='o', markersize=3,
+                label='Predicted (your weather input)')
+ 
+        # Shade difference
+        ax.fill_between(days_t2, start_val, report_tool2[col],
+                        alpha=0.12, color=color)
+ 
+        # Mark extreme weather weeks
+        if 'Weather_Risk' in report_tool2.columns:
+            extreme_days = report_tool2[report_tool2['Weather_Risk'] == 'Extreme']['Day']
+            high_days    = report_tool2[report_tool2['Weather_Risk'] == 'High']['Day']
+            for d in extreme_days:
+                ax.axvspan(d - 0.5, d + 0.5, color='red', alpha=0.15)
+            for d in high_days:
+                ax.axvspan(d - 0.5, d + 0.5, color='orange', alpha=0.10)
+ 
+        # Week separators
+        for w in range(1, 7):
+            ax.axvline(x=w*6 + 0.5, color='gray', linestyle=':', alpha=0.4)
+ 
+        ax.set_ylabel(f'{label} (kg/ha)')
+        ax.set_title(f'{label} — Initial vs Predicted')
+        ax.legend(loc='upper right', fontsize=9)
+        ax.grid(alpha=0.3)
+        ax.set_xlim(1, 42)
+ 
+    axes[-1].set_xlabel('Day')
+ 
+    # Legend for weather shading
+    from matplotlib.patches import Patch
+    legend_patches = [
+        Patch(facecolor='red',    alpha=0.3, label='Extreme weather days (Temp ≥45°C)'),
+        Patch(facecolor='orange', alpha=0.2, label='High risk days'),
+    ]
+    fig.legend(handles=legend_patches, loc='lower center', ncol=2,
+               fontsize=9, bbox_to_anchor=(0.5, -0.01))
+ 
+    plt.tight_layout()
+    plt.savefig('graph2_npk_weather_comparison.png', dpi=150, bbox_inches='tight')
+    print("Graph 2 saved: graph2_npk_weather_comparison.png")
+    plt.show()
+ 
+ 
+# ============================================================================
+# SAVE REPORTS
+# ============================================================================
+ 
+def save_report(df, filename):
+    df.to_csv(filename, index=False)
+    print(f"Report saved: {filename}")
+ 
+ 
+# ============================================================================
+# MAIN
+# ============================================================================
+ 
+if __name__ == "__main__":
+ 
+    # ----- CONFIG — change these -----
+    FILEPATH   = "Punjab_Smart_Agri_Ecosystem_Dataset.xlsx"
+    CROP       = "Wheat"     # Wheat / Rice / Cotton / Mustard / Gram
+    START_N    = 350.0       # kg/ha — enter manually
+    START_P    = 22.0        # kg/ha — enter manually
+    START_K    = 250.0       # kg/ha — enter manually
+ 
+    # ----- Load & preprocess -----
+    df_raw = load_data(FILEPATH)
+    df_full, df_model, encoders = preprocess(df_raw)
+ 
+    # ----- Train model -----
+    model, scaler = train_model(df_model)
+ 
+    # ----- Tool 1: Ideal 42-day -----
+    report1 = tool1_ideal_42day(
+        model, scaler, df_full, encoders, CROP,
+        START_N, START_P, START_K)
+    save_report(report1, "tool1_ideal_42day_report.csv")
+ 
+    # ----- Tool 2: Real-world 42-day (manual input / IoT-ready) -----
+    # To use IoT: set iot_mode=True, pass iot_weekly_data list of 7 dicts
+    # e.g. iot_weekly_data = [{'temp':35,'rain':80,'humidity':60}, ...]
+    report2 = tool2_realworld_42day(
+        model, scaler, encoders, CROP,
+        START_N, START_P, START_K,
+        iot_mode=False, iot_weekly_data=None)
+    save_report(report2, "tool2_realworld_42day_report.csv")
+ 
+    # ----- Tool 3: Crop growth stage -----
+    tool3_crop_age_prediction(
+        df_full, CROP,
+        current_N=280.0, current_P=21.0, current_K=240.0,
+        current_recovery=45.0, current_week=4)
+ 
+    # ----- Graph 1: Ideal NPK transition -----
+    plot_graph1(report1, CROP)
+ 
+    # ----- Graph 2: Initial vs weather-based prediction -----
+    plot_graph2(report1, report2, CROP, START_N, START_P, START_K)
+ 
+ 
